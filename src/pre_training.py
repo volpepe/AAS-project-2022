@@ -58,7 +58,8 @@ def play_game(agent:Agent, game:vzd.DoomGame):
             # Check if we have reached the ending state
             done = game.is_episode_finished()
             if done:
-                # Final state reached: create a simple black image as next image
+                # Final state reached: create a simple black image as next image 
+                # (must be uint8 for PIL to work)
                 next_screen = np.zeros(screen.shape, dtype=np.uint8)
             else:
                 # Get next image from the game
