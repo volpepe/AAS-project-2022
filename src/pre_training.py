@@ -1,12 +1,14 @@
 # Common imports
 import time
+import math
 import numpy as np
 import tensorflow as tf
+from tqdm import tqdm
 # Vizdoom
 import vizdoom as vzd
 # Our modules
 from variables import PRETRAINING_MAP_PATH, CONFIG_EXTENSION, PRETRAINING_EPISODES,\
-    SKIP_FRAMES
+    SKIP_FRAMES, TIMESTEPS_PER_EPISODE
 from agent import Agent
 from state import StateManager
 from action import Action
@@ -36,39 +38,41 @@ def play_game(agent:Agent, game:vzd.DoomGame):
         done = game.is_episode_finished()
         # Run the game until it's over
         timestep = 0
-        while not done:
-            # Obtain the state from the game (the image on screen)
-            screen = game.get_state().screen_buffer
-            # Update the StateManager to obtain the current state
-            state = state_manager.get_current_state(screen)
-            # Let the agent choose the action from the State
-            action = agent.choose_action(state)
-            # Increase timestep for current episode
-            timestep += 1
-            # Apply the action on the game and get the extrinsic reward.
-            extrinsic_reward = game.make_action(actions[action], SKIP_FRAMES)
+        with tqdm(total=math.ceil(TIMESTEPS_PER_EPISODE/SKIP_FRAMES)) as pbar:
+            while not done:
+                # Obtain the state from the game (the image on screen)
+                screen = game.get_state().screen_buffer
+                # Update the StateManager to obtain the current state
+                state = state_manager.get_current_state(screen)
+                # Let the agent choose the action from the State
+                action = agent.choose_action(state)
+                # Increase timestep for current episode
+                timestep += 1
+                pbar.update(1)
+                # Apply the action on the game and get the extrinsic reward.
+                extrinsic_reward = game.make_action(actions[action], SKIP_FRAMES)
 
-            ###################################
-            # TODO INSERT CURIOSITY MODULE HERE
-            # intrinsic_reward = ...          #
-            ###################################
+                ###################################
+                # TODO INSERT CURIOSITY MODULE HERE
+                # intrinsic_reward = ...          #
+                ###################################
 
-            reward = extrinsic_reward
+                reward = extrinsic_reward
 
-            # Check if we have reached the ending state
-            done = game.is_episode_finished()
-            if done:
-                # Final state reached: create a simple black image as next image 
-                # (must be uint8 for PIL to work)
-                next_screen = np.zeros(screen.shape, dtype=np.uint8)
-            else:
-                # Get next image from the game
-                next_screen = game.get_state().screen_buffer
-            # Create the next state
-            next_state = state_manager.get_current_state(next_screen)
+                # Check if we have reached the ending state
+                done = game.is_episode_finished()
+                if done:
+                    # Final state reached: create a simple black image as next image 
+                    # (must be uint8 for PIL to work)
+                    next_screen = np.zeros(screen.shape, dtype=np.uint8)
+                else:
+                    # Get next image from the game
+                    next_screen = game.get_state().screen_buffer
+                # Create the next state
+                next_state = state_manager.get_current_state(next_screen)
 
-            # Train the agent with the current experience batch
-            agent.train_step((state, action, reward, next_state))
+                # Train the agent with the current experience batch
+                agent.train_step((state, action, reward, next_state))
 
         total_reward = game.get_total_reward()
         print(f"Got a total reward of: {total_reward}")
