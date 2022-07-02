@@ -18,7 +18,7 @@ class StateManager():
         # a new frame, the old one gets discarded, creating a perfect tool for stacking
         # the last 4 frames
         self.image_size = PREPROCESSING_SIZE
-        self.screen_buffer = deque([np.zeros(self.image_size) for _ in range(STACK_FRAMES)])
+        self.screen_buffer = deque([np.zeros(self.image_size) for _ in range(STACK_FRAMES)], maxlen=STACK_FRAMES)
 
     def preprocess_image(self, img) -> np.ndarray:
         '''
@@ -37,5 +37,5 @@ class StateManager():
         img = self.preprocess_image(new_image.transpose(1,2,0))     # 3x480x640 --> 480x640x3
         # Add the image to the buffer
         self.screen_buffer.append(img)
-        # Stacks the images in the buffer and returns a single numpy array
-        return State(np.stack(self.screen_buffer))
+        # Stacks the images in the buffer and returns a single numpy array (stacking is done on last dimension)
+        return State(np.stack(self.screen_buffer, axis=-1))
