@@ -11,5 +11,10 @@ TESTING_MAP_PATH_SPARSE = "wads/my_way_home_sparse"
 TESTING_MAP_PATH_VERY_SPARSE = "wads/my_way_home_verySparse"
 TRAINING_EPISODES = 10_000
 
+TESTING_EPISODES = 10
+
 SKIP_FRAMES = STACK_FRAMES = 4
 PREPROCESSING_SIZE = (42,42)      # Preprocessed images will be 42x42
+
+ICM_WEIGHTS_PATH = 'models/ICM/icm.ckpt'
+ACTOR_CRITIC_WEIGHTS_PATH = 'models/ac/ac.ckpt'
