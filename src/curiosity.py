@@ -126,19 +126,9 @@ class EncodingLayer(Layer):
         # Inputs are the states St and St+1, [1, 42, 42, 4] tensors
         st, st1 = inputs
         # Compute encoding of state st and st1
-        #  1x288 <- 1x3x3x32 <- 1x6x6x32 <- 1x11x11x32 <- 1x21x21x32 <- 1x42x42x4
-        # e_st  = self.flatten(self.conv4(self.conv3(self.conv2(self.conv1(st)))))
-        # e_st1 = self.flatten(self.conv4(self.conv3(self.conv2(self.conv1(st1)))))
-        e_st = self.conv1(st)
-        e_st = self.conv2(e_st)
-        e_st = self.conv3(e_st)
-        e_st = self.conv4(e_st)
-        e_st = self.flatten(e_st)
-        e_st1 = self.conv1(st1)
-        e_st1 = self.conv2(e_st1)
-        e_st1 = self.conv3(e_st1)
-        e_st1 = self.conv4(e_st1)
-        e_st1 = self.flatten(e_st1)
+        # 1x288 <- 1x3x3x32 <- 1x6x6x32 <- 1x11x11x32 <- 1x21x21x32 <- 1x42x42x4
+        e_st  = self.flatten(self.conv4(self.conv3(self.conv2(self.conv1(st)))))
+        e_st1 = self.flatten(self.conv4(self.conv3(self.conv2(self.conv1(st1)))))
         return e_st, e_st1
 
 
