@@ -1,6 +1,9 @@
 # Common imports
+import os
 import time
 import math
+from typing import List
+from curiosity import ICM
 import numpy as np
 import tensorflow as tf
 from tqdm import tqdm
@@ -13,6 +16,7 @@ from agent import Agent
 from state import StateManager
 from action import Action
 
+
 # Obtain the list of available actions as one-hot-encoded buttons
 def make_actions(num_available_actions):
     actions = []
@@ -22,9 +26,8 @@ def make_actions(num_available_actions):
         actions.append(ll)
     return actions
 
-def play_game(agent:Agent, game:vzd.DoomGame):
-    # Create the actions as one-hot encoded lists of pressed buttons:
-    actions = make_actions(len(Action))
+
+def play_game(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:ICM):
     # Start counting the playing time
     time_start = time.time()
     # Loop over episodes
@@ -51,14 +54,6 @@ def play_game(agent:Agent, game:vzd.DoomGame):
                 pbar.update(1)
                 # Apply the action on the game and get the extrinsic reward.
                 extrinsic_reward = game.make_action(actions[action], SKIP_FRAMES)
-
-                ###################################
-                # TODO INSERT CURIOSITY MODULE HERE
-                # intrinsic_reward = ...          #
-                ###################################
-
-                reward = extrinsic_reward
-
                 # Check if we have reached the ending state
                 done = game.is_episode_finished()
                 if done:
@@ -70,7 +65,14 @@ def play_game(agent:Agent, game:vzd.DoomGame):
                     next_screen = game.get_state().screen_buffer
                 # Create the next state
                 next_state = state_manager.get_current_state(next_screen)
-
+                # Get the intrinsic reward by the ICM. At the same time, batch the representations
+                intrinsic_reward = curiosity_model((tf.cast(tf.expand_dims(state.repr, axis=0), dtype=tf.float32), 
+                                                    tf.expand_dims(tf.one_hot(action, depth=len(Action), dtype=tf.float32), axis=0), 
+                                                    tf.cast(tf.expand_dims(next_state.repr, axis=0), dtype=tf.float32)))
+                print(intrinsic_reward)
+                print(extrinsic_reward)
+                print("==============")
+                reward = extrinsic_reward + intrinsic_reward
                 # Train the agent with the current experience batch
                 agent.train_step((state, action, reward, next_state))
 
@@ -88,25 +90,28 @@ if __name__ == '__main__':
         device = "/CPU:0"
 
     # Create a DoomGame instance. 
-    # DoomGame represents an instance of the game and provides an interface
-    #   for our agents to interact with it.
+    # DoomGame represents an instance of the game and provides an interface for our agents to interact with it.
     game = vzd.DoomGame()
-
     # Load the pre-training map using the configuration files
     training_config_file = PRETRAINING_MAP_PATH + CONFIG_EXTENSION
     game.load_config(training_config_file)
-
     # Initialize the game.
     game.init()
 
-    # Initialize the agent (initially just a random agent)
-    agent = Agent()
+    # Create the actions as one-hot encoded lists of pressed buttons:
+    actions = make_actions(len(Action))
 
     # Start playing
     with tf.device(device):
-        # Everything is executed in the context of the device (on GPU if available
-        # or on CPU).
-        play_game(agent, game)
-
+        # Everything is executed in the context of the device (on GPU if available or on CPU).
+        # Initialize the agent (initially just a random agent)
+        agent = Agent()
+        # Instantiate the ICM (Curiosity model)
+        curiosity_model = ICM(len(Action))
+        if os.path.exists(os.path.join('models', 'ICM')):
+            # TODO: Load weights
+            pass
+        # Play the game
+        play_game(game, agent, actions, curiosity_model)
+        # At the end, close the game
         game.close()
-
