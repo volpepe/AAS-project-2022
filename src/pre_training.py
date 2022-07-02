@@ -1,4 +1,5 @@
 # Common imports
+from collections import deque
 import os
 import time
 import math
@@ -27,7 +28,9 @@ def make_actions(num_available_actions):
     return actions
 
 
-def play_game(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:ICM):
+def play_game(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:ICM, train=True):
+    # Create a deque of rewards
+    rewards = deque([], maxlen=TIMESTEPS_PER_EPISODE)
     # Start counting the playing time
     time_start = time.time()
     # Loop over episodes
@@ -65,19 +68,28 @@ def play_game(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:ICM)
                     next_screen = game.get_state().screen_buffer
                 # Create the next state
                 next_state = state_manager.get_current_state(next_screen)
-                # Get the intrinsic reward by the ICM. At the same time, batch the representations
+                # Get the intrinsic reward by the ICM. At the same time, train it to compute better and better representations.
                 intrinsic_reward = curiosity_model((tf.cast(tf.expand_dims(state.repr, axis=0), dtype=tf.float32), 
                                                     tf.expand_dims(tf.one_hot(action, depth=len(Action), dtype=tf.float32), axis=0), 
-                                                    tf.cast(tf.expand_dims(next_state.repr, axis=0), dtype=tf.float32)))
-                print(intrinsic_reward)
-                print(extrinsic_reward)
-                print("==============")
+                                                    tf.cast(tf.expand_dims(next_state.repr, axis=0), dtype=tf.float32)),
+                                                    training=True)
                 reward = extrinsic_reward + intrinsic_reward
+                rewards.append(reward)
                 # Train the agent with the current experience batch
                 agent.train_step((state, action, reward, next_state))
-
-        total_reward = game.get_total_reward()
-        print(f"Got a total reward of: {total_reward}")
+    
+        # End of episode: compute aggregated statistics
+        icm_stats = curiosity_model.end_episode()
+        total_reward = sum(rewards)
+        total_extrinsic_reward = game.get_total_reward()
+        total_intrinsic_reward = total_reward - total_extrinsic_reward
+        mean_reward_per_time_step = np.mean(rewards)
+        episode_rewards_std = np.std(rewards)
+        print(f"Total reward: {total_reward:.6f}\tExtrinsic: {total_extrinsic_reward:.6f}\tCuriosity: {total_intrinsic_reward:.6f}")
+        print(f"Mean reward per time step: {mean_reward_per_time_step:.6f}\tStd: {episode_rewards_std:.6f}")
+        print(f"ICM statistics:\n\tForward loss: {np.mean(icm_stats['loss_forward']):.4f}\n\tInverse loss: \
+{np.mean(icm_stats['loss_inverse']):.4f}\n\tTotal loss: {np.mean(icm_stats['total_loss']):.4f}")
+        rewards.clear()
 
 
 if __name__ == '__main__':
@@ -112,6 +124,6 @@ if __name__ == '__main__':
             # TODO: Load weights
             pass
         # Play the game
-        play_game(game, agent, actions, curiosity_model)
+        play_game(game, agent, actions, curiosity_model, train=True)
         # At the end, close the game
         game.close()
