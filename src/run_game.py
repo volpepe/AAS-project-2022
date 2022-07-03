@@ -85,11 +85,10 @@ def training_step(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:
         intrinsic_reward = curiosity_model((tf.cast(tf.expand_dims(state.repr, axis=0), dtype=tf.float32), 
                                             tf.expand_dims(tf.one_hot(action.value, depth=len(Action), dtype=tf.float32), axis=0), 
                                             tf.cast(tf.expand_dims(next_state.repr, axis=0), dtype=tf.float32)),
-                                            training=True)
+                                            training=True).numpy()
         reward = extrinsic_reward + intrinsic_reward
         # Then we need to compute the loss for the agent
-        agent.compute_loss(state, action, next_state, reward, None, done, tape, discount, iteration)
-        agent_loss = sum(agent.losses)
+        agent_loss = agent.compute_loss(state, action, next_state, reward, None, done, tape, discount, iteration)
         icm_loss = sum(curiosity_model.losses)
         # The ICM had already computed its loss in the forward pass.
         total_loss = policy_update_weight*agent_loss + icm_loss
@@ -105,9 +104,9 @@ def training_step(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:
         'intrinsic_reward': intrinsic_reward, 
         'extrinsic_reward': extrinsic_reward, 
         'total_reward'    : reward,
-        'total_loss'      : total_loss,
-        'icm_loss'        : icm_loss, 
-        'agent_loss'      : agent_loss
+        'total_loss'      : total_loss.numpy(),
+        'icm_loss'        : icm_loss.numpy(), 
+        'agent_loss'      : agent_loss.numpy()
     }
 
 
@@ -125,7 +124,7 @@ def test_step(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:ICM,
     intrinsic_reward = curiosity_model((tf.cast(tf.expand_dims(state.repr, axis=0), dtype=tf.float32), 
                                         tf.expand_dims(tf.one_hot(action.value, depth=len(Action), dtype=tf.float32), axis=0), 
                                         tf.cast(tf.expand_dims(next_state.repr, axis=0), dtype=tf.float32)),
-                                        training=False)
+                                        training=False).numpy()
     return done, {
         'intrinsic_reward': intrinsic_reward, 
         'extrinsic_reward': extrinsic_reward, 
@@ -144,7 +143,7 @@ def choose_episodes(task):
 
 def play_game(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:ICM, train:bool=True,
               save_weights:bool=False, start_episode:int=0, task:str='train', discount:float=0.99,
-              optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3)):
+              optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3, clipvalue=1.0)):
     # Create some deques for statistics about the game
     extrinsic_rewards = deque([])
     intrinsic_rewards = deque([])
@@ -172,12 +171,13 @@ def play_game(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:ICM,
             while not done:
                 if train:
                     done, stats = training_step(game, agent, actions, curiosity_model, state_manager, optimizer, 
-                                                timestep, discount, policy_update_weight=0.5)
+                                                timestep, discount, policy_update_weight=0.8)
                 else:
                     done, stats = test_step(game, agent, actions, curiosity_model, state_manager)
                 # Increase timestep for current episode
                 timestep += 1
                 pbar.update(1)
+                pbar.set_description(str({k: f"{stats[k]:.6f}" for k in stats}))
             # Is it time to update the statistics array?
             if (timestep-1 % STATS_UPDATE_FREQUENCY) == 0:
                 extrinsic_rewards.append(stats['extrinsic_reward'])
@@ -194,7 +194,7 @@ def play_game(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:ICM,
         print(f"Total reward: {total_extrinsic_reward:.4f}")
         if task == 'train' or task == 'pretrain':
             print(f"Losses:")
-            print(f"\tICM Loss: {stats['icm_loss']:.4f}\t (Forward loss: {icm_stats['loss_forward']:.4f}, Inverse loss: {icm_stats['loss_inverse']:.4f})")
+            print(f"\tICM Loss: {stats['icm_loss']:.4f}\t (Forward loss: {icm_stats['loss_forward'][-1][0]:.4f}, Inverse loss: {icm_stats['loss_inverse'][-1][0]:.4f})")
             print(f"\tAgent Loss: {stats['agent_loss']}")
             print(f"\tTotal Loss: {stats['total_loss']}")
 
