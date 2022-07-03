@@ -31,7 +31,7 @@ class ICM(Model):
     learnt by this inverse model is shared with the "forward" model which is the one computing
     state St+1 given the encoding of statr St and the action At.
     '''
-    def __init__(self, num_actions, beta=0.1, eta=0.01, *args, **kwargs) -> None:
+    def __init__(self, num_actions, beta=0.2, eta=0.01, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.num_actions = num_actions
         self.beta = beta                # Weight of the forward model loss against the inverse model loss
@@ -89,7 +89,7 @@ class ICM(Model):
             self.statistics['loss_forward'].append(loss_forward)
             self.statistics['total_loss'].append(loss_value)
         # Finally, compute the output (intrinsic reward)
-        ri = self.eta/2*tf.norm(pred_e_st1 - e_st1)
+        ri = tf.math.minimum(0.1, self.eta/2*tf.norm(pred_e_st1 - e_st1))    # Don't produce rewards that are too large
         return ri
 
 
@@ -100,10 +100,10 @@ class EncodingLayer(Layer):
     '''
     def __init__(self) -> None:
         super().__init__()
-        self.conv1   = layers.Conv2D(filters=32, kernel_size=3, strides=(2,2), padding='same', activation='elu')
-        self.conv2   = layers.Conv2D(filters=32, kernel_size=3, strides=(2,2), padding='same', activation='elu')
-        self.conv3   = layers.Conv2D(filters=32, kernel_size=3, strides=(2,2), padding='same', activation='elu')
-        self.conv4   = layers.Conv2D(filters=32, kernel_size=3, strides=(2,2), padding='same', activation='elu')
+        self.conv1   = layers.Conv2D(filters=8, kernel_size=3, strides=(2,2), padding='same', activation='relu')    # Original has 32 filters and elu activation
+        self.conv2   = layers.Conv2D(filters=8, kernel_size=3, strides=(2,2), padding='same', activation='relu')
+        self.conv3   = layers.Conv2D(filters=8, kernel_size=3, strides=(2,2), padding='same', activation='relu')
+        self.conv4   = layers.Conv2D(filters=32, kernel_size=3, strides=(2,2), padding='same', activation='relu')
         self.flatten = layers.Flatten()
     
     def call(self, inputs) -> Tuple[tf.Tensor, tf.Tensor]:
@@ -126,8 +126,8 @@ class ForwardModel(Layer):
         super().__init__(*args, **kwargs)
         self.num_actions = num_actions
         self.concat = layers.Concatenate(axis=1)
-        self.dense1 = layers.Dense(256, activation='elu')
-        self.dense2 = layers.Dense(288, activation='elu')
+        self.dense1 = layers.Dense(32, activation='relu')                                                           # Original is 256
+        self.dense2 = layers.Dense(288, activation='relu')
 
     def call(self, inputs) -> tf.Tensor:
         # Inputs: the action At and the encoding of the state e(St)
@@ -148,7 +148,7 @@ class InverseModel(Layer):
         super().__init__(*args, **kwargs)
         self.num_actions = num_actions
         self.concat  = layers.Concatenate(axis=1)
-        self.dense1  = layers.Dense(256, activation='relu')
+        self.dense1  = layers.Dense(32, activation='relu')                                                          # Original is 256
         self.dense2  = layers.Dense(self.num_actions, activation='softmax')
 
     def call(self, inputs) -> tf.Tensor:
