@@ -1,6 +1,6 @@
 from typing import Dict, Tuple
 import tensorflow as tf
-from tensorflow.keras import layers, losses, optimizers, Model
+from tensorflow.keras import layers, losses, Model
 from tensorflow.keras.layers import Layer
 
 class ICM(Model):
@@ -31,17 +31,15 @@ class ICM(Model):
     learnt by this inverse model is shared with the "forward" model which is the one computing
     state St+1 given the encoding of statr St and the action At.
     '''
-    def __init__(self, num_actions, optimizer=optimizers.Adam(learning_rate=10**-3), 
-                 beta=0.1, eta=0.01, *args, **kwargs) -> None:
+    def __init__(self, num_actions, beta=0.1, eta=0.01, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.num_actions = num_actions
         self.beta = beta                # Weight of the forward model loss against the inverse model loss
         self.eta = eta                  # Scaling factor for the intrinsic reward signal
-        self.optimizer = optimizer      # The optimizer to be used in training
         self.statistics = self.new_stats_dict()         # To be used in training to collect aggregated statistics about an episode
         self.encoding_layer = EncodingLayer()
-        self.forward_model = ForwardModel(num_actions)
-        self.inverse_model = InverseModel(num_actions)
+        self.forward_model  = ForwardModel(num_actions)
+        self.inverse_model  = InverseModel(num_actions)
 
     def new_stats_dict(self) -> Dict:
         return {
@@ -63,47 +61,33 @@ class ICM(Model):
         '''
         Function that allows dynamic changes to the scaling factor.
         '''
-        self.eta = new_eta        
+        self.eta = new_eta
 
-    def compute_values(self, inputs) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+    def call(self, inputs, training=False) -> tf.Tensor:
+        # Inputs are the state St, action At and state St+1
+        # States are [1,42,42,4] tensors, while action At is a [1,num_actions] tensor
         st, at, st1 = inputs
         # Computing state encodings
         e_st, e_st1 = self.encoding_layer((st, st1))
         # Predict the encoding of state st1 and the action.
         pred_e_st1 = self.forward_model((at, e_st))
         pred_at = self.inverse_model((e_st, e_st1))
-        return e_st, e_st1, pred_e_st1, pred_at
-
-    def call(self, inputs, training=False) -> tf.Tensor:
-        '''
-        Note: when training=True we are also computing the loss and a training step
-        for the model.
-        '''
-        # Inputs are the state St, action At and state St+1
-        # States are [1,42,42,4] tensors, while action At is a [1,num_actions] tensor
-        st, at, st1 = inputs
         if training:
-            with tf.GradientTape() as tape:
-                e_st, e_st1, pred_e_st1, pred_at = self.compute_values(inputs)
-                # We compute the loss of the ICM. It's a composite loss, because we have two 
-                # communicating modules:
-                # - The loss of the forward model is a regression loss between the 
-                #   ground truth encoding and the predicted one
-                # - The loss of the inverse model is a cross-entropy loss between the
-                #   ground truth action probability distribution and the predicted one.
-                loss_inverse = losses.categorical_crossentropy(at, pred_at)
-                loss_forward = losses.mean_squared_error(e_st1, pred_e_st1)
-                loss_value = (1-self.beta)*tf.reduce_sum(loss_inverse) + self.beta*tf.reduce_sum(loss_forward)
-            # Compute the gradient and apply it
-            gradients = tape.gradient(loss_value, self.trainable_weights)
-            self.optimizer.apply_gradients(zip(gradients, self.trainable_weights))
+            # We compute the loss of the ICM. It's a composite loss, because we have two 
+            # communicating modules:
+            # - The loss of the forward model is a regression loss between the 
+            #   ground truth encoding and the predicted one
+            # - The loss of the inverse model is a cross-entropy loss between the
+            #   ground truth action probability distribution and the predicted one.
+            loss_inverse = losses.categorical_crossentropy(at, pred_at)
+            loss_forward = losses.mean_squared_error(e_st1, pred_e_st1)
+            loss_value = (1-self.beta)*tf.reduce_sum(loss_inverse) + self.beta*tf.reduce_sum(loss_forward)
+            # Use the add_loss API to retrieve this value as a loss to minimize later
+            self.add_loss(loss_value)
             # Update statistics
             self.statistics['loss_inverse'].append(loss_inverse)
             self.statistics['loss_forward'].append(loss_forward)
             self.statistics['total_loss'].append(loss_value)
-        else:
-            # Simply obtain the values calling the networks. Do not compute the loss.
-            e_st, e_st1, pred_e_st1, pred_at = self.compute_values(inputs)
         # Finally, compute the output (intrinsic reward)
         ri = self.eta/2*tf.norm(pred_e_st1 - e_st1)
         return ri

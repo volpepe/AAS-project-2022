@@ -1,3 +1,4 @@
+import tensorflow as tf
 from tensorflow import keras
 from action import Action
 from state import State
@@ -10,8 +11,9 @@ class Agent(keras.Model):
     def __init__(self) -> None:
         super().__init__()
 
-    def choose_action(self, state:State) -> Action:
-        return random.randint(0, len(Action)-1)
+    def choose_action(self, state:State, training=False) -> Action:
+        return Action(random.randint(0, len(Action)-1))
 
-    def train_step(self, train_sequence) -> None:
+    def compute_loss(self, st:State, a:Action, st1:State, r:float, a1:Action, 
+                     done:bool, tape:tf.GradientTape, discount:float=0.99, iteration:int=1):
         pass
