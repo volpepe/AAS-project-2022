@@ -12,7 +12,7 @@
             "program": "src/run_game.py",
             "console": "integratedTerminal",
             "justMyCode": true,
-            "args": ["-t", "train", "-m", "dense", "-a", "actor_critic", "-s"]
+            "args": ["-t", "pretrain", "-a", "actor_critic", "-s"]
         }
     ]
 }
