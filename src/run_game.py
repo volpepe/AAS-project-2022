@@ -1,9 +1,9 @@
 # Vizdoom
+from sre_parse import State
 import vizdoom as vzd
 # Common imports
-from typing import Dict, List, Tuple
+from typing import Dict, List, Sequence, Tuple
 from collections import deque
-import os
 import time
 import math
 import argparse
@@ -17,10 +17,11 @@ from state import StateManager
 from action import Action
 from curiosity import ICM
 # Variables
-from variables import ACTOR_CRITIC_WEIGHTS_PATH, ICM_WEIGHTS_PATH, \
+from variables import ACTOR_CRITIC_WEIGHTS_PATH, CLIP_NO, ICM_WEIGHTS_PATH, LAMBDA, LOGS_DIR, \
     PRETRAINING_MAP_PATH, CONFIG_EXTENSION, PRETRAINING_EPISODES, \
     SKIP_FRAMES, STATS_UPDATE_FREQUENCY, TESTING_EPISODES, TESTING_MAP_PATH_DENSE, \
-    TESTING_MAP_PATH_SPARSE, TESTING_MAP_PATH_VERY_SPARSE, TIMESTEPS_PER_EPISODE, TRAINING_EPISODES
+    TESTING_MAP_PATH_SPARSE, TESTING_MAP_PATH_VERY_SPARSE, TIMESTEPS_PER_EPISODE, \
+    TRAINING_EPISODES, WEIGHTS_SAVE_FREQUENCY
 
 
 def parse_args():
@@ -52,7 +53,7 @@ def make_actions(num_available_actions):
     return actions
 
 
-def get_next_state(state_manager, prev_screen):
+def get_next_state(state_manager:StateManager, prev_screen):
     # Check if we have reached the ending state
     done = game.is_episode_finished()
     if done:
@@ -68,34 +69,36 @@ def get_next_state(state_manager, prev_screen):
 
 
 def training_step(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:ICM, state_manager:StateManager, 
-                  optimizer:tf.keras.optimizers.Optimizer, iteration:int=1, discount:float=0.99, policy_update_weight=0.5):
+                  optimizer:tf.keras.optimizers.Optimizer, iteration:int=1, policy_update_weight=LAMBDA):
     # Obtain the state from the game (the image on screen)
     screen = game.get_state().screen_buffer
     # Update the StateManager to obtain the current state
     state = state_manager.get_current_state(screen)
-    with tf.GradientTape(persistent=True) as tape:          # Persistent because we need to update two separate models
-        # Let the agent choose the action from the State
-        action = agent.choose_action(state, training=True)
+    with tf.GradientTape(persistent=True) as tape:
+        # We call the agent to obtain the policy for the current state and the estimated value.
+        action_dict = agent.choose_action(state, training=True)
         # Temporarily stop the gradient recording as we compute the next state and extrinsic reward
         with tape.stop_recording():
             # Apply the action on the game and get the extrinsic reward.
-            extrinsic_reward = game.make_action(actions[action.value], SKIP_FRAMES)
+            extrinsic_reward = game.make_action(actions[action_dict['action'].value], SKIP_FRAMES)
             done, next_state = get_next_state(state_manager, screen)
         # Resume gradient recording: get the intrinsic reward by the ICM.
         intrinsic_reward = curiosity_model((tf.cast(tf.expand_dims(state.repr, axis=0), dtype=tf.float32), 
-                                            tf.expand_dims(tf.one_hot(action.value, depth=len(Action), dtype=tf.float32), axis=0), 
+                                            tf.expand_dims(tf.one_hot(action_dict['action'].value, depth=len(Action), 
+                                                dtype=tf.float32), axis=0), 
                                             tf.cast(tf.expand_dims(next_state.repr, axis=0), dtype=tf.float32)),
-                                            training=True).numpy()
-        reward = extrinsic_reward + intrinsic_reward
+                                            training=True)
+        reward = extrinsic_reward + intrinsic_reward    # Note: reward here becomes a Tensor
         # Then we need to compute the loss for the agent
-        agent_loss = agent.compute_loss(state, action, next_state, reward, None, done, tape, discount, iteration)
+        agent_loss = agent.compute_loss(state, action_dict, next_state, reward, {}, done, iteration)
+        # Scale agent loss
+        agent_loss = policy_update_weight*agent_loss
+        # Finally we collect the loss for the ICM
         icm_loss = sum(curiosity_model.losses)
-        # The ICM had already computed its loss in the forward pass.
-        total_loss = policy_update_weight*agent_loss + icm_loss
 
     # Compute gradients and updates
-    gradients_curiosity = tape.gradient(total_loss, curiosity_model.trainable_weights)    
-    gradients_agent     = tape.gradient(total_loss,           agent.trainable_weights)
+    gradients_curiosity = tape.gradient(icm_loss, curiosity_model.trainable_weights)    
+    gradients_agent     = tape.gradient(agent_loss,         agent.trainable_weights)
     optimizer.apply_gradients(zip(gradients_curiosity, curiosity_model.trainable_weights))
     optimizer.apply_gradients(zip(gradients_agent,               agent.trainable_weights))
     # Remove the tape
@@ -104,7 +107,6 @@ def training_step(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:
         'intrinsic_reward': intrinsic_reward, 
         'extrinsic_reward': extrinsic_reward, 
         'total_reward'    : reward,
-        'total_loss'      : total_loss.numpy(),
         'icm_loss'        : icm_loss.numpy(), 
         'agent_loss'      : agent_loss.numpy()
     }
@@ -116,19 +118,12 @@ def test_step(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:ICM,
     # Update the StateManager to obtain the current state
     state = state_manager.get_current_state(screen)
     # Let the agent choose the action from the State
-    action = agent.choose_action(state, training=False)
+    action = agent.choose_action(state, training=False)['action']
     # Apply the action on the game and get the extrinsic reward.
     extrinsic_reward = game.make_action(actions[action.value], SKIP_FRAMES)
-    done, next_state = get_next_state(state_manager, screen)
-    # Get the intrinsic reward by the ICM.
-    intrinsic_reward = curiosity_model((tf.cast(tf.expand_dims(state.repr, axis=0), dtype=tf.float32), 
-                                        tf.expand_dims(tf.one_hot(action.value, depth=len(Action), dtype=tf.float32), axis=0), 
-                                        tf.cast(tf.expand_dims(next_state.repr, axis=0), dtype=tf.float32)),
-                                        training=False).numpy()
+    done, _ = get_next_state(state_manager, screen)
     return done, {
-        'intrinsic_reward': intrinsic_reward, 
         'extrinsic_reward': extrinsic_reward, 
-        'total_reward'    : intrinsic_reward + extrinsic_reward,
     }
 
 
@@ -141,9 +136,19 @@ def choose_episodes(task):
         return TESTING_EPISODES
 
 
+def do_save_weights_and_logs(curiosity_model:ICM, agent:Agent, extrinsic_rewards:Sequence, 
+                             episode:int, task:str='train'):
+    curiosity_model.save_weights(ICM_WEIGHTS_PATH)
+    print(f"ICM weights saved succesfully at {ICM_WEIGHTS_PATH}")
+    agent.save_weights(ACTOR_CRITIC_WEIGHTS_PATH)
+    print(f"Agent weights saved successfully at {ACTOR_CRITIC_WEIGHTS_PATH}")
+    np.save(LOGS_DIR + task, np.array(extrinsic_rewards), allow_pickle=True)
+    print(f"Rewards history saved successfully at {LOGS_DIR + task}")
+
+
 def play_game(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:ICM, train:bool=True,
-              save_weights:bool=False, start_episode:int=0, task:str='train', discount:float=0.99,
-              optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3, clipvalue=1.0)):
+              save_weights:bool=False, start_episode:int=0, task:str='train',
+              optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3, clipnorm=CLIP_NO)):
     # Create some deques for statistics about the game
     extrinsic_rewards = deque([])
     intrinsic_rewards = deque([])
@@ -151,7 +156,6 @@ def play_game(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:ICM,
     if train:
         icm_losses    = deque([])
         agent_losses  = deque([])
-        total_losses  = deque([])
     # Select maximum number of epochs based on task
     tot_episodes = choose_episodes(task)
     # Start counting the playing time
@@ -171,43 +175,37 @@ def play_game(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:ICM,
             while not done:
                 if train:
                     done, stats = training_step(game, agent, actions, curiosity_model, state_manager, optimizer, 
-                                                timestep, discount, policy_update_weight=0.8)
+                                                timestep)
                 else:
                     done, stats = test_step(game, agent, actions, curiosity_model, state_manager)
                 # Increase timestep for current episode
                 timestep += 1
                 pbar.update(1)
                 pbar.set_description(str({k: f"{stats[k]:.6f}" for k in stats}))
-            # Is it time to update the statistics array?
-            if (timestep-1 % STATS_UPDATE_FREQUENCY) == 0:
-                extrinsic_rewards.append(stats['extrinsic_reward'])
-                intrinsic_rewards.append(stats['intrinsic_reward'])
-                total_rewards.append(stats['total_reward'])
-                if train:
-                    icm_losses.append(stats['icm_loss'])
-                    agent_losses.append(stats['agent_loss'])
-                    total_losses.append(stats['total_loss'])
-    
+                # Is it time to update the statistics array?
+                if ((timestep-1) % STATS_UPDATE_FREQUENCY) == 0:
+                    extrinsic_rewards.append(stats['extrinsic_reward'])
+                    if train:
+                        intrinsic_rewards.append(stats['intrinsic_reward'])
+                        total_rewards.append(stats['total_reward'])
+                        icm_losses.append(stats['icm_loss'])
+                        agent_losses.append(stats['agent_loss'])
+
         # End of episode: compute aggregated statistics
         icm_stats = curiosity_model.end_episode()
         total_extrinsic_reward = game.get_total_reward()
-        print(f"Total reward: {total_extrinsic_reward:.4f}")
+        print(f"Extrinsic reward: {total_extrinsic_reward:.4f}")
         if task == 'train' or task == 'pretrain':
             print(f"Losses:")
             print(f"\tICM Loss: {stats['icm_loss']:.4f}\t (Forward loss: {icm_stats['loss_forward'][-1][0]:.4f}, Inverse loss: {icm_stats['loss_inverse'][-1][0]:.4f})")
             print(f"\tAgent Loss: {stats['agent_loss']}")
-            print(f"\tTotal Loss: {stats['total_loss']}")
 
-    # End of episodes
+        if save_weights and (((ep % WEIGHTS_SAVE_FREQUENCY) == 0) or (ep == (tot_episodes-1))):
+            do_save_weights_and_logs(curiosity_model, agent, extrinsic_rewards, ep)
+
+    # End of game
     time_end = time.time()
     print(f"Task finished. It took {time_end-time_start:.4f} seconds.")
-
-    # Save weights if needed
-    if save_weights:
-        curiosity_model.save_weights(ICM_WEIGHTS_PATH)
-        print(f"ICM weights saved succesfully at {ICM_WEIGHTS_PATH}")
-        agent.save_weights(ACTOR_CRITIC_WEIGHTS_PATH)
-        print(f"Agent weights saved successfully at {ACTOR_CRITIC_WEIGHTS_PATH}")
 
 
 def select_map(args):
@@ -230,7 +228,7 @@ def select_map(args):
 def select_agent(args, actions):
     agent = args.agent
     if agent == 'random':
-        return Agent()
+        return Agent(len(actions))
     if agent == 'actor_critic':
         return BaselineActorCriticAgent(len(actions))
     # If we arrive here we have chosen something not implemented
@@ -239,17 +237,17 @@ def select_agent(args, actions):
 
 def load_weights(curiosity_model, agent):
     # Check if path for the ICM weights exists
-    if os.path.exists(ICM_WEIGHTS_PATH):
+    try:
         curiosity_model.load_weights(ICM_WEIGHTS_PATH)
         print("Loaded weights for the ICM")
-    else:
+    except:
         print(f"Could not find weights for the ICM model at {ICM_WEIGHTS_PATH}")
     # Select actor weights based on the type of the actor
     if isinstance(agent, BaselineActorCriticAgent):
-        if os.path.exists(ACTOR_CRITIC_WEIGHTS_PATH):
+        try:
             agent.load_weights(ACTOR_CRITIC_WEIGHTS_PATH)
             print("Loaded weights for the Actor Critic agent")
-        else:
+        except:
             print(f"Could not find weights for the Actor Critic model at {ACTOR_CRITIC_WEIGHTS_PATH}")
     else:
         print("Agent not implemented or does not require weights.")
