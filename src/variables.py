@@ -20,6 +20,7 @@ PREPROCESSING_SIZE = (42,42)      # Preprocessed images will be 42x42
 
 ICM_WEIGHTS_PATH = 'models/ICM/icm.ckpt'
 ACTOR_CRITIC_WEIGHTS_PATH = 'models/ac/ac.ckpt'
+ACTOR_CRITIC_WEIGHTS_PATH_NO_ICM = 'models/ac_no_icm/ac_no_icm.ckpt'
 LOGS_DIR = 'models/logs/'
 
 ETA     = 0.05       # Scaling factor for the intrinsic reward signal
@@ -29,3 +30,4 @@ SIGMA   = 0.05       # Entropy coefficient
 LAMBDA  = 0.1        # Actor-critic loss coefficient
 CLIP_RE = 0.1        # Clip the intrinsic reward
 CLIP_NO = 40.0       # Gradient norm clipping
+ICM_LW  = 10.0       # Weight of the ICM loss with respect to the actor's loss

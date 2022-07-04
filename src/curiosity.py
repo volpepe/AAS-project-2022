@@ -2,7 +2,7 @@ from typing import Dict, Tuple
 import tensorflow as tf
 from tensorflow.keras import layers, losses, Model
 from tensorflow.keras.layers import Layer
-from variables import BETA, ETA, CLIP_RE
+from variables import BETA, ETA, CLIP_RE, ICM_LW
 
 class ICM(Model):
     '''
@@ -84,7 +84,7 @@ class ICM(Model):
             loss_forward = losses.huber(e_st1, pred_e_st1, delta=1.0)
             loss_value = (1-self.beta)*tf.reduce_sum(loss_inverse) + self.beta*tf.reduce_sum(loss_forward)
             # Use the add_loss API to retrieve this value as a loss to minimize later
-            self.add_loss(loss_value)
+            self.add_loss(ICM_LW*loss_value)
             # Update statistics
             self.statistics['loss_inverse'].append(loss_inverse.numpy())
             self.statistics['loss_forward'].append(loss_forward.numpy())
@@ -101,9 +101,9 @@ class EncodingLayer(Layer):
     '''
     def __init__(self) -> None:
         super().__init__()
-        self.conv1   = layers.Conv2D(filters=8, kernel_size=3, strides=(2,2), padding='same', activation='relu')    # Original has 32 filters and elu activation
-        self.conv2   = layers.Conv2D(filters=8, kernel_size=3, strides=(2,2), padding='same', activation='relu')
-        self.conv3   = layers.Conv2D(filters=8, kernel_size=3, strides=(2,2), padding='same', activation='relu')
+        self.conv1   = layers.Conv2D(filters=32, kernel_size=3, strides=(2,2), padding='same', activation='relu')    # Original has 32 filters and elu activation
+        self.conv2   = layers.Conv2D(filters=32, kernel_size=3, strides=(2,2), padding='same', activation='relu')
+        self.conv3   = layers.Conv2D(filters=32, kernel_size=3, strides=(2,2), padding='same', activation='relu')
         self.conv4   = layers.Conv2D(filters=32, kernel_size=3, strides=(2,2), padding='same', activation='relu')
         self.flatten = layers.Flatten()
     
@@ -127,7 +127,7 @@ class ForwardModel(Layer):
         super().__init__(*args, **kwargs)
         self.num_actions = num_actions
         self.concat = layers.Concatenate(axis=1)
-        self.dense1 = layers.Dense(32, activation='relu')                                                           # Original is 256
+        self.dense1 = layers.Dense(128, activation='relu')                                                           # Original is 256
         self.dense2 = layers.Dense(288, activation='relu')
 
     def call(self, inputs) -> tf.Tensor:
@@ -149,7 +149,7 @@ class InverseModel(Layer):
         super().__init__(*args, **kwargs)
         self.num_actions = num_actions
         self.concat  = layers.Concatenate(axis=1)
-        self.dense1  = layers.Dense(32, activation='relu')                                                          # Original is 256
+        self.dense1  = layers.Dense(128, activation='relu')                                                          # Original is 256
         self.dense2  = layers.Dense(self.num_actions, activation='softmax')
 
     def call(self, inputs) -> tf.Tensor:
