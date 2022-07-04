@@ -69,7 +69,7 @@ def get_next_state(state_manager:StateManager, prev_screen):
 
 
 def training_step(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:ICM, state_manager:StateManager, 
-                  optimizer:tf.keras.optimizers.Optimizer, iteration:int=1, policy_update_weight=LAMBDA):
+                  iteration:int=1, policy_update_weight=LAMBDA):
     # Obtain the state from the game (the image on screen)
     screen = game.get_state().screen_buffer
     # Update the StateManager to obtain the current state
@@ -99,8 +99,8 @@ def training_step(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:
     # Compute gradients and updates
     gradients_curiosity = tape.gradient(icm_loss, curiosity_model.trainable_weights)    
     gradients_agent     = tape.gradient(agent_loss,         agent.trainable_weights)
-    optimizer.apply_gradients(zip(gradients_curiosity, curiosity_model.trainable_weights))
-    optimizer.apply_gradients(zip(gradients_agent,               agent.trainable_weights))
+    curiosity_model.optimizer.apply_gradients(zip(gradients_curiosity, curiosity_model.trainable_weights))
+    agent.optimizer.apply_gradients(zip(gradients_agent, agent.trainable_weights))
     # Remove the tape
     del tape
     return done, {                      # Return if episode is done and some statistics about the step
@@ -147,8 +147,7 @@ def do_save_weights_and_logs(curiosity_model:ICM, agent:Agent, extrinsic_rewards
 
 
 def play_game(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:ICM, train:bool=True,
-              save_weights:bool=False, start_episode:int=0, task:str='train',
-              optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3, clipnorm=CLIP_NO)):
+              save_weights:bool=False, start_episode:int=0, task:str='train'):
     # Create some deques for statistics about the game
     extrinsic_rewards = deque([])
     intrinsic_rewards = deque([])
@@ -174,8 +173,7 @@ def play_game(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:ICM,
         with tqdm(total=math.ceil(TIMESTEPS_PER_EPISODE/SKIP_FRAMES)) as pbar:
             while not done:
                 if train:
-                    done, stats = training_step(game, agent, actions, curiosity_model, state_manager, optimizer, 
-                                                timestep)
+                    done, stats = training_step(game, agent, actions, curiosity_model, state_manager, timestep)
                 else:
                     done, stats = test_step(game, agent, actions, curiosity_model, state_manager)
                 # Increase timestep for current episode
@@ -228,9 +226,10 @@ def select_map(args):
 def select_agent(args, actions):
     agent = args.agent
     if agent == 'random':
-        return Agent(len(actions))
+        return Agent(len(actions), optimizer=None)
     if agent == 'actor_critic':
-        return BaselineActorCriticAgent(len(actions))
+        return BaselineActorCriticAgent(len(actions), 
+            tf.keras.optimizers.Adam(learning_rate=1e-3, clipnorm=CLIP_NO))
     # If we arrive here we have chosen something not implemented
     raise NotImplementedError
 
@@ -285,7 +284,7 @@ if __name__ == '__main__':
         # Initialize the agent.
         agent = select_agent(args, actions)
         # Instantiate the ICM (Curiosity model)
-        curiosity_model = ICM(len(Action))
+        curiosity_model = ICM(len(Action), tf.keras.optimizers.Adam(learning_rate=5e-3, clipnorm=CLIP_NO))
         # Check if we need to load the weights for the agent and for the ICM
         if args.load_weights:
             load_weights(curiosity_model, agent)
