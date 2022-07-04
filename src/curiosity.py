@@ -2,6 +2,7 @@ from typing import Dict, Tuple
 import tensorflow as tf
 from tensorflow.keras import layers, losses, Model
 from tensorflow.keras.layers import Layer
+from variables import BETA, ETA, CLIP_RE
 
 class ICM(Model):
     '''
@@ -31,11 +32,11 @@ class ICM(Model):
     learnt by this inverse model is shared with the "forward" model which is the one computing
     state St+1 given the encoding of statr St and the action At.
     '''
-    def __init__(self, num_actions, beta=0.2, eta=0.01, *args, **kwargs) -> None:
+    def __init__(self, num_actions, beta=BETA, eta=ETA, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.num_actions = num_actions
-        self.beta = beta                # Weight of the forward model loss against the inverse model loss
-        self.eta = eta                  # Scaling factor for the intrinsic reward signal
+        self.beta = beta                                # Weight of the forward model loss against the inverse model loss
+        self.eta = eta                                  # Scaling factor for the intrinsic reward signal
         self.statistics = self.new_stats_dict()         # To be used in training to collect aggregated statistics about an episode
         self.encoding_layer = EncodingLayer()
         self.forward_model  = ForwardModel(num_actions)
@@ -80,16 +81,16 @@ class ICM(Model):
             # - The loss of the inverse model is a cross-entropy loss between the
             #   ground truth action probability distribution and the predicted one.
             loss_inverse = losses.categorical_crossentropy(at, pred_at)
-            loss_forward = losses.mean_squared_error(e_st1, pred_e_st1)
+            loss_forward = losses.huber(e_st1, pred_e_st1, delta=1.0)
             loss_value = (1-self.beta)*tf.reduce_sum(loss_inverse) + self.beta*tf.reduce_sum(loss_forward)
             # Use the add_loss API to retrieve this value as a loss to minimize later
             self.add_loss(loss_value)
             # Update statistics
-            self.statistics['loss_inverse'].append(loss_inverse)
-            self.statistics['loss_forward'].append(loss_forward)
-            self.statistics['total_loss'].append(loss_value)
+            self.statistics['loss_inverse'].append(loss_inverse.numpy())
+            self.statistics['loss_forward'].append(loss_forward.numpy())
+            self.statistics['total_loss'].append(loss_value.numpy())
         # Finally, compute the output (intrinsic reward)
-        ri = tf.math.minimum(0.1, self.eta/2*tf.norm(pred_e_st1 - e_st1))    # Don't produce rewards that are too large
+        ri = tf.math.minimum(CLIP_RE, self.eta/2*tf.norm(pred_e_st1 - e_st1))   # Don't exagerate
         return ri
 
 
