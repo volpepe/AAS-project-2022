@@ -23,7 +23,7 @@ ACTOR_CRITIC_WEIGHTS_PATH = 'models/ac/ac.ckpt'
 ACTOR_CRITIC_WEIGHTS_PATH_NO_ICM = 'models/ac_no_icm/ac_no_icm.ckpt'
 LOGS_DIR = 'models/logs/'
 
-ETA     = 0.05       # Scaling factor for the intrinsic reward signal
+ETA     = 0.1        # Scaling factor for the intrinsic reward signal
 BETA    = 0.8        # Weight of the forward model loss against the inverse model loss
 GAMMA   = 0.9        # Discount for rewards
 SIGMA   = 0.05       # Entropy coefficient

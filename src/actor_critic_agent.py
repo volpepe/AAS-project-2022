@@ -49,7 +49,8 @@ class BaselineActorCriticAgent(Agent):
 
     def choose_action(self, state:State, training=False) -> Dict:
         action_probs, state_value = self(tf.expand_dims(tf.cast(state.repr, tf.float32), axis=0), training=training)
-        action = tf.argmax(action_probs, axis=1)
+        # Sample from the actions probability distribution
+        action = tf.random.categorical(action_probs, 1)
         return {
             'action': Action(action.numpy()[0]),
             'policy': action_probs[0],
