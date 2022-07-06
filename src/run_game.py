@@ -242,7 +242,8 @@ def select_map(args):
 def select_agent(args, actions):
     agent = args.agent
     if agent == 'random':
-        return Agent(len(actions), optimizer=None)
+        return Agent(len(actions),
+            tf.keras.optimizers.Adam(learning_rate=1e-3, clipnorm=CLIP_NO))
     if agent == 'actor_critic':
         return BaselineActorCriticAgent(len(actions), 
             tf.keras.optimizers.Adam(learning_rate=1e-3, clipnorm=CLIP_NO))
