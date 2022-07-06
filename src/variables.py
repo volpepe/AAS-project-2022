@@ -18,15 +18,15 @@ WEIGHTS_SAVE_FREQUENCY = 5
 SKIP_FRAMES = STACK_FRAMES = 4
 PREPROCESSING_SIZE = (42,42)      # Preprocessed images will be 42x42
 
-ICM_WEIGHTS_PATH = 'models/ICM/icm.ckpt'
-ACTOR_CRITIC_WEIGHTS_PATH = 'models/ac/ac.ckpt'
-ACTOR_CRITIC_WEIGHTS_PATH_NO_ICM = 'models/ac_no_icm/ac_no_icm.ckpt'
-LOGS_DIR = 'models/logs/'
+ICM_WEIGHTS_PATH = 'models/ICM/icm_{}_{}.ckpt'
+ACTOR_CRITIC_WEIGHTS_PATH = 'models/ac/ac_{}_{}.ckpt'
+ACTOR_CRITIC_WEIGHTS_PATH_NO_ICM = 'models/ac_no_icm/ac_no_icm_{}_{}.ckpt'
+LOGS_DIR = 'models/logs/{}_{}'
 
 ETA     = 0.1        # Scaling factor for the intrinsic reward signal
 BETA    = 0.8        # Weight of the forward model loss against the inverse model loss
 GAMMA   = 0.9        # Discount for rewards
-SIGMA   = 0.05       # Entropy coefficient
+SIGMA   = 0.01       # Entropy coefficient
 LAMBDA  = 0.1        # Actor-critic loss coefficient
 CLIP_RE = 0.1        # Clip the intrinsic reward
 CLIP_NO = 40.0       # Gradient norm clipping

@@ -23,5 +23,5 @@ class Agent(keras.Model):
         }
 
     def compute_loss(self, st:State, a:Dict, st1:State, r:tf.Tensor, a1:Dict, 
-                     done:bool, iteration:int=1):
+                     done:bool, iteration:int, tape:tf.GradientTape):
         return 0

@@ -1,6 +1,7 @@
 # Vizdoom
 import vizdoom as vzd
 # Common imports
+import os
 from typing import Dict, List, Sequence, Tuple, Union
 from collections import deque
 import time
@@ -16,11 +17,7 @@ from state import StateManager
 from action import Action
 from curiosity import ICM
 # Variables
-from variables import ACTOR_CRITIC_WEIGHTS_PATH, ACTOR_CRITIC_WEIGHTS_PATH_NO_ICM, CLIP_NO, ICM_WEIGHTS_PATH, LAMBDA, LOGS_DIR, \
-    PRETRAINING_MAP_PATH, CONFIG_EXTENSION, PRETRAINING_EPISODES, \
-    SKIP_FRAMES, STATS_UPDATE_FREQUENCY, TESTING_EPISODES, TESTING_MAP_PATH_DENSE, \
-    TESTING_MAP_PATH_SPARSE, TESTING_MAP_PATH_VERY_SPARSE, TIMESTEPS_PER_EPISODE, \
-    TRAINING_EPISODES, WEIGHTS_SAVE_FREQUENCY
+from variables import *
 
 
 def parse_args():
@@ -69,8 +66,8 @@ def get_next_state(state_manager:StateManager, prev_screen):
     return done, next_state
 
 
-def training_step(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:ICM, state_manager:StateManager, 
-                  iteration:int=1, policy_update_weight=LAMBDA):
+def training_step(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:Union[ICM, None], 
+                  state_manager:StateManager, iteration:int=1, policy_update_weight=LAMBDA):
     # Obtain the state from the game (the image on screen)
     screen = game.get_state().screen_buffer
     # Update the StateManager to obtain the current state
@@ -96,7 +93,7 @@ def training_step(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:
         else:
             reward = extrinsic_reward
         # Then we need to compute the loss for the agent
-        agent_loss = agent.compute_loss(state, action_dict, next_state, reward, {}, done, iteration)
+        agent_loss = agent.compute_loss(state, action_dict, next_state, reward, {}, done, iteration, tape)
         # Scale agent loss
         agent_loss = policy_update_weight*agent_loss
 
@@ -104,8 +101,8 @@ def training_step(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:
     if curiosity_model is not None:
         gradients_curiosity = tape.gradient(icm_loss, curiosity_model.trainable_weights)    
         curiosity_model.optimizer.apply_gradients(zip(gradients_curiosity, curiosity_model.trainable_weights))
-    gradients_agent     = tape.gradient(agent_loss, agent.trainable_weights)
-    agent.optimizer.apply_gradients(zip(gradients_agent,  agent.trainable_weights))
+    gradients_agent = tape.gradient(agent_loss, agent.trainable_weights)
+    agent.optimizer.apply_gradients(zip(gradients_agent, agent.trainable_weights))
     # Remove the tape
     del tape
     return done, {                      # Return if episode is done and some statistics about the step
@@ -142,23 +139,24 @@ def choose_episodes(task):
 
 
 def do_save_weights_and_logs(curiosity_model:ICM, agent:Agent, extrinsic_rewards:Sequence, 
-                             episode:int, task:str='train'):
+                             episode:int, task:str, game_map:str):
     if curiosity_model is not None:
-        curiosity_model.save_weights(ICM_WEIGHTS_PATH)
-        print(f"ICM weights saved succesfully at {ICM_WEIGHTS_PATH}")
-        agent.save_weights(ACTOR_CRITIC_WEIGHTS_PATH)
-        print(f"Agent weights saved successfully at {ACTOR_CRITIC_WEIGHTS_PATH}")
-        np.save(LOGS_DIR + task, np.array(extrinsic_rewards), allow_pickle=True)
-        print(f"Rewards history saved successfully at {LOGS_DIR + task}")
+        curiosity_model.save_weights(ICM_WEIGHTS_PATH.format(task, game_map))
+        print(f"ICM weights saved succesfully at {ICM_WEIGHTS_PATH.format(task, game_map)}")
+        agent.save_weights(ACTOR_CRITIC_WEIGHTS_PATH.format(task, game_map))
+        print(f"Agent weights saved successfully at {ACTOR_CRITIC_WEIGHTS_PATH.format(task, game_map)}")
+        np.save(LOGS_DIR.format(task, game_map), np.array(extrinsic_rewards), allow_pickle=True)
+        print(f"Rewards history saved successfully at {LOGS_DIR.format(task, game_map)}")
     else:
-        agent.save_weights(ACTOR_CRITIC_WEIGHTS_PATH_NO_ICM)
-        print(f"Agent weights saved successfully at {ACTOR_CRITIC_WEIGHTS_PATH_NO_ICM}")
-        np.save(LOGS_DIR + task + '_no_icm', np.array(extrinsic_rewards), allow_pickle=True)
-        print(f"Rewards history saved successfully at {LOGS_DIR + task + '_no_icm'}")
+        agent.save_weights(ACTOR_CRITIC_WEIGHTS_PATH_NO_ICM.format(task, game_map))
+        print(f"Agent weights saved successfully at {ACTOR_CRITIC_WEIGHTS_PATH_NO_ICM.format(task, game_map)}")
+        np.save(LOGS_DIR.format(task, game_map + '_no_icm'), np.array(extrinsic_rewards), allow_pickle=True)
+        print(f"Rewards history saved successfully at {LOGS_DIR.format(task, game_map + '_no_icm')}")
 
 
 def play_game(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:ICM, train:bool=True,
-              save_weights:bool=False, start_episode:int=0, task:str='train'):
+              save_weights:bool=False, start_episode:int=0, task:str='train', game_map:str='dense'):
+    global_timestep = 0
     # Create some deques for statistics about the game
     extrinsic_rewards = deque([])
     if curiosity_model is not None:
@@ -191,8 +189,10 @@ def play_game(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:ICM,
                     done, stats = test_step(game, agent, actions, state_manager)
                 # Increase timestep for current episode
                 timestep += 1
+                global_timestep += 1
                 pbar.update(1)
-                pbar.set_description(str({k: f"{stats[k]:.6f}" for k in stats if stats[k] is not None}))
+                pbar.set_description(f'Timestep: {global_timestep}' + str({
+                    k: f"{stats[k]:.6f}" for k in stats if stats[k] is not None}))
                 # Is it time to update the statistics array?
                 if ((timestep-1) % STATS_UPDATE_FREQUENCY) == 0:
                     extrinsic_rewards.append(stats['extrinsic_reward'])
@@ -215,7 +215,7 @@ def play_game(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:ICM,
             print(f"\tAgent Loss: {stats['agent_loss']}")
 
         if save_weights and (((ep % WEIGHTS_SAVE_FREQUENCY) == 0) or (ep == (tot_episodes-1))):
-            do_save_weights_and_logs(curiosity_model, agent, extrinsic_rewards, ep)
+            do_save_weights_and_logs(curiosity_model, agent, extrinsic_rewards, ep, task, game_map)
 
     # End of game
     time_end = time.time()
@@ -250,26 +250,26 @@ def select_agent(args, actions):
     raise NotImplementedError
 
 
-def load_weights(curiosity_model, agent):
+def load_weights(curiosity_model, agent, task, game_map):
     try:
-        curiosity_model.load_weights(ICM_WEIGHTS_PATH)
+        curiosity_model.load_weights(ICM_WEIGHTS_PATH.format(task, game_map))
         print("Loaded weights for the ICM")
     except:
-        print(f"Could not find weights for the ICM model at {ICM_WEIGHTS_PATH}")
+        print(f"Could not find weights for the ICM model at {ICM_WEIGHTS_PATH.format(task, game_map)}")
     # Select actor weights based on the type of the actor
     if isinstance(agent, BaselineActorCriticAgent):
         if curiosity_model is not None:
             try:
-                agent.load_weights(ACTOR_CRITIC_WEIGHTS_PATH)
+                agent.load_weights(ACTOR_CRITIC_WEIGHTS_PATH.format(task, game_map))
                 print("Loaded weights for the Actor Critic agent")
             except:
-                print(f"Could not find weights for the Actor Critic model at {ACTOR_CRITIC_WEIGHTS_PATH}")
+                print(f"Could not find weights for the Actor Critic model at {ACTOR_CRITIC_WEIGHTS_PATH.format(task, game_map)}")
         else:
             try:
-                agent.load_weights(ACTOR_CRITIC_WEIGHTS_PATH_NO_ICM)
+                agent.load_weights(ACTOR_CRITIC_WEIGHTS_PATH_NO_ICM.format(task, game_map))
                 print("Loaded weights for the Actor Critic agent")
             except:
-                print(f"Could not find weights for the Actor Critic model at {ACTOR_CRITIC_WEIGHTS_PATH_NO_ICM}")
+                print(f"Could not find weights for the Actor Critic model at {ACTOR_CRITIC_WEIGHTS_PATH_NO_ICM.format(task, game_map)}")
     else:
         print("Agent not implemented or does not require weights.")
 
@@ -277,6 +277,12 @@ def load_weights(curiosity_model, agent):
 if __name__ == '__main__':
     # Collect args
     args = parse_args()
+
+    # Create folders for models and logs
+    os.makedirs(os.path.join('models', 'ac'), exist_ok=True)
+    os.makedirs(os.path.join('models', 'ac_no_icm'), exist_ok=True)
+    os.makedirs(os.path.join('models', 'ICM'), exist_ok=True)
+    os.makedirs(os.path.join('models', 'logs'), exist_ok=True)
 
     # Check if a GPU is available for training
     if len(tf.config.list_physical_devices('GPU')) > 0:
@@ -306,14 +312,16 @@ if __name__ == '__main__':
         # Initialize the agent.
         agent = select_agent(args, actions)
         # Instantiate the ICM (Curiosity model)
-        curiosity_model = ICM(len(Action), tf.keras.optimizers.Adam(learning_rate=5e-3, clipnorm=CLIP_NO)) if not args.no_curiosity else None
+        curiosity_model =   ICM(len(Action), 
+                                tf.keras.optimizers.Adam(learning_rate=1e-3, clipnorm=CLIP_NO)) \
+                            if not args.no_curiosity else None
         # Check if we need to load the weights for the agent and for the ICM
         if args.load_weights:
-            load_weights(curiosity_model, agent)
+            load_weights(curiosity_model, agent, args.task, args.map)
         # Play the game training the agents or evaluating the loaded weights.
         play_game(game, agent, actions, curiosity_model, 
             train=(args.task == 'train' or args.task == 'pretrain'), 
             save_weights=args.save_weights, start_episode=args.start_episode,
-            task=args.task)
+            task=args.task, game_map=args.map)
         # At the end, close the game
         game.close()

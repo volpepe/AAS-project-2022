@@ -58,7 +58,7 @@ class BaselineActorCriticAgent(Agent):
             'value' : state_value[0]
         }
 
-    def compute_loss(self, st:State, a:Dict, st1:State, r:tf,Tensor, a1:Dict, done:bool, iteration:int=1):
+    def compute_loss(self, st:State, a:Dict, st1:State, r:tf.Tensor, a1:Dict, done:bool, iteration:int, tape:tf.GradientTape):
         """
         In actor critic with baseline, the update is computed in this way:
         - We call delta the difference between the immediate reward (the sum of intrinsic and extrinsic)
@@ -90,7 +90,10 @@ class BaselineActorCriticAgent(Agent):
         a_mask = tf.one_hot(a['action'].value, depth=self.num_actions)     # Index of the action the agent chose
         # Check if next state is final
         if not done:
-            v_st1_pred = self.choose_action(st, training=False)['value']
+            with tape.stop_recording():
+                # Do not record this operation in the gradient tape, we don't want to compute the gradient
+                # of this second function call.
+                v_st1_pred = self.choose_action(st, training=False)['value']
         else:
             v_st1_pred = tf.zeros((1,))
         # Compute delta
