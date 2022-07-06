@@ -26,7 +26,7 @@ class BaselineActorCriticAgent(Agent):
         self.conv3 = layers.Conv2D(filters=16, kernel_size=3, strides=(2,2), padding='same', activation='relu')   
         self.conv4 = layers.Conv2D(filters=32, kernel_size=3, strides=(2,2), padding='same', activation='relu')
         self.dropout = layers.Dropout(0.5)
-        self.permutation = layers.Permute((3, 1, 2), input_shape=(1, 3, 3, 32))                               # Original connects the CNNs with an LSTM somehow
+        self.permutation = layers.Permute((3, 1, 2), input_shape=(1, 3, 3, 32))
         self.reshape = layers.Reshape((32, 9))
         self.lstm  = layers.LSTM(64)
         self.actor = layers.Dense(self.num_actions, activation='softmax')        # Produce probabilities
@@ -44,6 +44,8 @@ class BaselineActorCriticAgent(Agent):
         x = self.lstm(x)                                # 1x64
         # Then we produce the policy values
         action_probs = self.actor(x)                    # 1xnum_actions
+        # Avoid producing a tensor containing probability 0 for some actions.
+        action_probs = tf.clip_by_value(action_probs, 1e-10, 1.0)
         # ... and the state value.
         state_value = self.critic(x)                    # 1x1
         return action_probs, state_value
@@ -106,5 +108,5 @@ class BaselineActorCriticAgent(Agent):
         # Entropy loss
         entropy_loss = -tf.reduce_sum(a_log_probs*a_probs)
         # Total loss
-        total_loss = tf.reduce_sum(actor_loss + .5 * critic_loss + SIGMA*entropy_loss)
+        total_loss = tf.reduce_sum(actor_loss + 0.5 * critic_loss + SIGMA*entropy_loss)
         return total_loss
