@@ -1,6 +1,4 @@
 # Vizdoom
-from distutils.sysconfig import customize_compiler
-from sre_parse import State
 import vizdoom as vzd
 # Common imports
 from typing import Dict, List, Sequence, Tuple, Union
@@ -71,8 +69,8 @@ def get_next_state(state_manager:StateManager, prev_screen):
     return done, next_state
 
 
-def training_step(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:Union[ICM,None], state_manager:StateManager, 
-                  optimizer:tf.keras.optimizers.Optimizer, iteration:int=1, policy_update_weight=LAMBDA):
+def training_step(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:ICM, state_manager:StateManager, 
+                  iteration:int=1, policy_update_weight=LAMBDA):
     # Obtain the state from the game (the image on screen)
     screen = game.get_state().screen_buffer
     # Update the StateManager to obtain the current state
@@ -105,9 +103,9 @@ def training_step(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:
     # Compute gradients and updates
     if curiosity_model is not None:
         gradients_curiosity = tape.gradient(icm_loss, curiosity_model.trainable_weights)    
-        optimizer.apply_gradients(zip(gradients_curiosity, curiosity_model.trainable_weights))
+        curiosity_model.optimizer.apply_gradients(zip(gradients_curiosity, curiosity_model.trainable_weights))
     gradients_agent     = tape.gradient(agent_loss, agent.trainable_weights)
-    optimizer.apply_gradients(zip(gradients_agent,  agent.trainable_weights))
+    agent.optimizer.apply_gradients(zip(gradients_agent,  agent.trainable_weights))
     # Remove the tape
     del tape
     return done, {                      # Return if episode is done and some statistics about the step
@@ -159,9 +157,8 @@ def do_save_weights_and_logs(curiosity_model:ICM, agent:Agent, extrinsic_rewards
         print(f"Rewards history saved successfully at {LOGS_DIR + task + '_no_icm'}")
 
 
-def play_game(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:Union[ICM, None], train:bool=True,
-              save_weights:bool=False, start_episode:int=0, task:str='train',
-              optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3, clipnorm=CLIP_NO)):
+def play_game(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:ICM, train:bool=True,
+              save_weights:bool=False, start_episode:int=0, task:str='train'):
     # Create some deques for statistics about the game
     extrinsic_rewards = deque([])
     if curiosity_model is not None:
@@ -189,8 +186,7 @@ def play_game(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:Unio
         with tqdm(total=math.ceil(TIMESTEPS_PER_EPISODE/SKIP_FRAMES)) as pbar:
             while not done:
                 if train:
-                    done, stats = training_step(game, agent, actions, curiosity_model, state_manager, optimizer, 
-                                                timestep)
+                    done, stats = training_step(game, agent, actions, curiosity_model, state_manager, timestep)
                 else:
                     done, stats = test_step(game, agent, actions, state_manager)
                 # Increase timestep for current episode
@@ -246,9 +242,10 @@ def select_map(args):
 def select_agent(args, actions):
     agent = args.agent
     if agent == 'random':
-        return Agent(len(actions))
+        return Agent(len(actions), optimizer=None)
     if agent == 'actor_critic':
-        return BaselineActorCriticAgent(len(actions))
+        return BaselineActorCriticAgent(len(actions), 
+            tf.keras.optimizers.Adam(learning_rate=1e-3, clipnorm=CLIP_NO))
     # If we arrive here we have chosen something not implemented
     raise NotImplementedError
 
@@ -309,7 +306,7 @@ if __name__ == '__main__':
         # Initialize the agent.
         agent = select_agent(args, actions)
         # Instantiate the ICM (Curiosity model)
-        curiosity_model = ICM(len(Action)) if not args.no_curiosity else None
+        curiosity_model = ICM(len(Action), tf.keras.optimizers.Adam(learning_rate=5e-3, clipnorm=CLIP_NO)) if not args.no_curiosity else None
         # Check if we need to load the weights for the agent and for the ICM
         if args.load_weights:
             load_weights(curiosity_model, agent)

@@ -32,9 +32,10 @@ class ICM(Model):
     learnt by this inverse model is shared with the "forward" model which is the one computing
     state St+1 given the encoding of statr St and the action At.
     '''
-    def __init__(self, num_actions, beta=BETA, eta=ETA, *args, **kwargs) -> None:
+    def __init__(self, num_actions, optimizer, beta=BETA, eta=ETA, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.num_actions = num_actions
+        self.optimizer = optimizer
         self.beta = beta                                # Weight of the forward model loss against the inverse model loss
         self.eta = eta                                  # Scaling factor for the intrinsic reward signal
         self.statistics = self.new_stats_dict()         # To be used in training to collect aggregated statistics about an episode

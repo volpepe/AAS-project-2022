@@ -16,9 +16,10 @@ class BaselineActorCriticAgent(Agent):
         - action probabilities
         - state value 
     """
-    def __init__(self, num_actions, discount:float=GAMMA) -> None:
-        super().__init__(num_actions)
+    def __init__(self, num_actions, optimizer, discount:float=GAMMA) -> None:
+        super().__init__(num_actions, optimizer)
         self.num_actions = num_actions
+        self.optimizer = optimizer
         self.discount = discount
         self.conv1 = layers.Conv2D(filters=8, kernel_size=3, strides=(2,2), padding='same', activation='relu')  # Original: 32 filters, elu activation
         self.conv2 = layers.Conv2D(filters=16, kernel_size=3, strides=(2,2), padding='same', activation='relu') 
