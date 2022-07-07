@@ -241,7 +241,7 @@ def play_game(game:vzd.DoomGame, agent:Agent, actions:List, intrinsic_model:RND,
 
         # End of episode: compute aggregated statistics
         total_extrinsic_reward = game.get_total_reward()
-        extrinsic_rewards.append(total_extrinsic_reward)
+        extrinsic_rewards.append({global_timestep: total_extrinsic_reward})
         print(f"Extrinsic reward: {total_extrinsic_reward:.4f}")
 
         if save_weights and (((ep % WEIGHTS_SAVE_FREQUENCY) == 0) or (ep == (tot_episodes-1))):

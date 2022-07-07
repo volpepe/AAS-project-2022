@@ -193,26 +193,13 @@ def play_game(game:vzd.DoomGame, agent:Agent, actions:List, curiosity_model:ICM,
                 pbar.update(1)
                 pbar.set_description(f'Timestep: {global_timestep}' + str({
                     k: f"{stats[k]:.6f}" for k in stats if stats[k] is not None}))
-                # Is it time to update the statistics array?
-                if ((timestep-1) % STATS_UPDATE_FREQUENCY) == 0:
-                    extrinsic_rewards.append(stats['extrinsic_reward'])
-                    if train:
-                        if curiosity_model is not None:
-                            intrinsic_rewards.append(stats['intrinsic_reward'])
-                            icm_losses.append(stats['icm_loss'])
-                        total_rewards.append(stats['total_reward'])
-                        agent_losses.append(stats['agent_loss'])
-
+    
         # End of episode: compute aggregated statistics
         if curiosity_model is not None:
             icm_stats = curiosity_model.end_episode()
         total_extrinsic_reward = game.get_total_reward()
+        extrinsic_rewards.append({global_timestep: total_extrinsic_reward})
         print(f"Extrinsic reward: {total_extrinsic_reward:.4f}")
-        if task == 'train' or task == 'pretrain':
-            print(f"Losses:")
-            if curiosity_model is not None:
-                print(f"\tICM Loss: {stats['icm_loss']:.4f}\t (Forward loss: {icm_stats['loss_forward'][-1][0]:.4f}, Inverse loss: {icm_stats['loss_inverse'][-1][0]:.4f})")
-            print(f"\tAgent Loss: {stats['agent_loss']}")
 
         if save_weights and (((ep % WEIGHTS_SAVE_FREQUENCY) == 0) or (ep == (tot_episodes-1))):
             do_save_weights_and_logs(curiosity_model, agent, extrinsic_rewards, ep, task, game_map)
