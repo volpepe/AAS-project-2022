@@ -36,8 +36,8 @@ def parse_args():
         help='The starting episode for the task. Training will resume from this episode onwards. Default is 0.')
     args.add_argument('-nr', '--no_render', action='store_true',
         help='If active, the game screen will not appear (useful for eg. server training)')
-    args.add_argument('-nc', '--no_curiosity', action="store_true",
-        help="Train the agent without the curiosity module")
+    args.add_argument('-ni', '--no_intrinsic', action="store_true",
+        help="Train the agent without intrinsic rewards")
     return args.parse_args()
 
 

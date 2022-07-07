@@ -1,0 +1,286 @@
+# Vizdoom
+from gc import collect
+import vizdoom as vzd
+# Common imports
+import os
+from typing import Dict, List, Sequence, Tuple
+from collections import deque
+import time
+import math
+import argparse
+import numpy as np
+import tensorflow as tf
+from tqdm import tqdm
+# Our modules
+from agent import Agent
+from actor_critic_agent import BaselineActorCriticAgent
+from state import RNDIntrinsicRewardNormalizer, RNDScreenPreprocessor
+from action import Action
+# Variables
+from variables import *
+
+def parse_args():
+    args = argparse.ArgumentParser()
+    args.add_argument('-t', '--task', default='train', choices=['train','pretrain','test'], type=str,
+        help='What task to start (training, pretraining or test). Default is "train"')
+    args.add_argument('-m', '--map', default='dense', choices=['dense','sparse','verysparse'], type=str,
+        help='What map to run (dense, sparse or verysparse). Pretrain map is only available using the pretrain argument in --task. Default is "dense"')
+    args.add_argument('-a', '--agent', default='random', choices=['random','actor_critic'], type=str,
+        help='The type of agent to use (random or actor_critic). Default is random.')
+    args.add_argument('-s', '--save_weights', action='store_true', 
+        help='If active, the new weights will be saved.')
+    args.add_argument('-l', '--load_weights', action='store_true',
+        help='If active, old weights (if found) are loaded into the models.')
+    args.add_argument('-st', '--start_episode', type=int, default=0,
+        help='The starting episode for the task. Training will resume from this episode onwards. Default is 0.')
+    args.add_argument('-nr', '--no_render', action='store_true',
+        help='If active, the game screen will not appear (useful for eg. server training)')
+    args.add_argument('-ni', '--no_intrinsic', action="store_true",
+        help="Train the agent without intrinsic rewards")
+    return args.parse_args()
+
+def select_map(args):
+    task = args.task
+    game_map = args.map
+    # Only one map is available for pretraining
+    if task == 'pretrain':
+        return PRETRAINING_MAP_PATH + CONFIG_EXTENSION
+    # Otherwise choose based on the map
+    if game_map == 'dense':
+        return TESTING_MAP_PATH_DENSE + CONFIG_EXTENSION
+    if game_map == 'sparse':
+        return TESTING_MAP_PATH_SPARSE + CONFIG_EXTENSION
+    if game_map == 'verysparse':
+        return TESTING_MAP_PATH_VERY_SPARSE + CONFIG_EXTENSION
+    # If we arrive here we have chosen something not implemented
+    raise NotImplementedError
+
+# Obtain the list of available actions as one-hot-encoded buttons
+def make_actions(num_available_actions):
+    actions = []
+    for i in range(num_available_actions):
+        ll = [False]*num_available_actions
+        ll[i] = True
+        actions.append(ll)
+    return actions
+
+def select_agent(args, actions):
+    agent = args.agent
+    if agent == 'random':
+        return Agent(len(actions),
+            tf.keras.optimizers.Adam(learning_rate=1e-3, clipnorm=CLIP_NO))
+    if agent == 'actor_critic':
+        return BaselineActorCriticAgent(len(actions), 
+            tf.keras.optimizers.Adam(learning_rate=1e-3, clipnorm=CLIP_NO))
+    # If we arrive here we have chosen something not implemented
+    raise NotImplementedError
+
+def load_weights(intrinsic_model, agent, task, game_map):
+    try:
+        intrinsic_model.load_weights(RND_WEIGHTS_PATH.format(task, game_map))
+        print("Loaded weights for the RND")
+    except:
+        print(f"Could not find weights for the RND model at {RND_WEIGHTS_PATH.format(task, game_map)}")
+    # Select actor weights based on the type of the actor
+    if isinstance(agent, BaselineActorCriticAgent):
+        if intrinsic_model is not None:
+            try:
+                agent.load_weights(ACTOR_CRITIC_WEIGHTS_PATH_RND.format(task, game_map))
+                print("Loaded weights for the Actor Critic agent")
+            except:
+                print(f"Could not find weights for the Actor Critic model at {ACTOR_CRITIC_WEIGHTS_PATH_RND.format(task, game_map)}")
+        else:
+            try:
+                agent.load_weights(ACTOR_CRITIC_WEIGHTS_PATH_NO_RND.format(task, game_map))
+                print("Loaded weights for the Actor Critic agent")
+            except:
+                print(f"Could not find weights for the Actor Critic model at {ACTOR_CRITIC_WEIGHTS_PATH_NO_RND.format(task, game_map)}")
+    else:
+        print("Agent not implemented or does not require weights.")
+
+def do_save_weights_and_logs(intrinsic_model:RND, agent:Agent, extrinsic_rewards:Sequence, 
+                             episode:int, task:str, game_map:str):
+    if intrinsic_model is not None:
+        intrinsic_model.save_weights(RND_WEIGHTS_PATH.format(task, game_map))
+        print(f"RND weights saved succesfully at {RND_WEIGHTS_PATH.format(task, game_map)}")
+        agent.save_weights(ACTOR_CRITIC_WEIGHTS_PATH_RND.format(task, game_map))
+        print(f"Agent weights saved successfully at {ACTOR_CRITIC_WEIGHTS_PATH_RND.format(task, game_map)}")
+        np.save(LOGS_DIR.format(task, game_map) + '_rnd', np.array(extrinsic_rewards), allow_pickle=True)
+        print(f"Rewards history saved successfully at {LOGS_DIR.format(task, game_map) + '_rnd.npy'}")
+    else:
+        agent.save_weights(ACTOR_CRITIC_WEIGHTS_PATH_NO_RND.format(task, game_map))
+        print(f"Agent weights saved successfully at {ACTOR_CRITIC_WEIGHTS_PATH_NO_RND.format(task, game_map)}")
+        np.save(LOGS_DIR.format(task, game_map) + '_no_rnd', np.array(extrinsic_rewards), allow_pickle=True)
+        print(f"Rewards history saved successfully at {LOGS_DIR.format(task, game_map + '_no_rnd.npy')}")
+
+def choose_episodes(task):
+    if task == 'train':
+        return TRAINING_EPISODES
+    elif task == 'pretrain':
+        return PRETRAINING_EPISODES
+    else:
+        return TESTING_EPISODES
+
+def get_next_screen(default_screen_shape):
+    # Check if we have reached the ending state
+    done = game.is_episode_finished()
+    if done:
+        # Final state reached: create a simple black image as next image 
+        # (must be uint8 for PIL to work)
+        next_screen = np.zeros(default_screen_shape.shape, dtype=np.uint8)
+    else:
+        # Get next image from the game
+        next_screen = game.get_state().screen_buffer
+    return done, next_screen
+
+def step(game:vzd.DoomGame, agent:Agent, actions:List, screen_preprocessor:RNDScreenPreprocessor) -> Tuple[bool, Dict]:
+    # Obtain the state from the game (the image on screen)
+    screen = game.get_state().screen_buffer
+    # Normalize, shrink, convert to grayscale
+    state = screen_preprocessor.preprocess_for_policy_net(screen)
+    # Let the agent choose the action from the State
+    action = agent.choose_action(state, training=False)['action']
+    # Apply the action on the game and get the extrinsic reward.
+    extrinsic_reward = game.make_action(actions[action.value], SKIP_FRAMES)
+    done, _ = get_next_screen(screen.shape)
+    return done, {
+        'extrinsic_reward': extrinsic_reward,
+    }
+
+def collect_experience(game:vzd.DoomGame, agent:Agent, actions:List, 
+                       intrinsic_model:RND, screen_preprocessor:RNDScreenPreprocessor):
+    # Initialize experience batch
+    experience_batch = {
+        'at'  : deque([]),
+        'et'  : deque([]),
+        'it'  : deque([])
+    }
+    # Open gradient tape to record neural network operations and compute gradients later
+    with tf.GradientTape(persistent=True) as tape:
+        # Collecting experience for training
+        with tqdm(total=math.ceil(TIMESTEPS_PER_EPISODE/SKIP_FRAMES)) as pbar:
+            while not done:
+                with tape.stop_recording():
+                    # Obtain the state from the game (the image on screen)
+                    screen = game.get_state().screen_buffer
+                    # Normalize, shrink, convert to grayscale
+                    policy_state = screen_preprocessor.preprocess_for_policy_net(screen)
+                # Let the agent choose the action from the State. This operation is recorded in the tape.
+                action = agent.choose_action(policy_state, training=True)
+                with tape.stop_recording():
+                    # Apply the action on the game and get the extrinsic reward.
+                    extrinsic_reward = game.make_action(actions[action['action']], SKIP_FRAMES)
+                    done, next_screen = get_next_screen(screen.shape)
+                    # Also, preprocess the next screen and pass it to the RND for computing the intrinsic reward
+                    next_state_rnd = screen_preprocessor.preprocess_for_rnd(next_screen)
+                # Record on tape the next forward passes into the intrinsic model and the calculation of the intrinsic reward.
+                gt_state_rnd, pred_state_rnd = intrinsic_model(tf.expand_dims(next_state_rnd, axis=0))
+                # Compute MSE between the two outputs
+                intrinsic_reward = tf.keras.losses.MeanSquaredError()(gt_state_rnd, pred_state_rnd)
+                with tape.stop_recording():
+                    experience_batch['at'].append(action)
+                    experience_batch['et'].append(extrinsic_reward)
+                    experience_batch['it'].append(intrinsic_reward)
+                    pbar.update(1)
+    
+    # TODO: COMPUTE LOSSES AND WEIGHT UPDATES
+    # TODO: FINISH IMPLEMENTATION OF RND
+
+def play_game(game:vzd.DoomGame, agent:Agent, actions:List, intrinsic_model:RND, train:bool=True,
+              save_weights:bool=False, start_episode:int=0, task:str='train', game_map:str='dense'):
+    global_timestep = 0
+    # Create some deques for statistics about the game
+    extrinsic_rewards = deque([])
+    if intrinsic_model is not None:
+        intrinsic_rewards = deque([])
+    total_rewards     = deque([])
+    # Select maximum number of epochs based on task
+    tot_episodes = choose_episodes(task)
+    # Instantiate screen preprocessor
+    screen_preprocessor = RNDScreenPreprocessor()
+    # Play a few steps to initialize the observation normalization parameters
+    game.new_episode()
+    for i in range(M):
+        screen_preprocessor.preprocess_for_rnd(game.get_state().screen_buffer)
+        at = np.random.randint(0, len(actions))
+        game.make_action(at, SKIP_FRAMES)
+    # Start counting the playing time
+    time_start = time.time()
+    # Loop over episodes
+    for ep in range(start_episode, tot_episodes):
+        print(f"----------------------\nEpoch: {ep}/{tot_episodes-1}\n----------------------")
+        screen_preprocessor.clear_preprocessed_screen_buffer()
+        # Start new episode of the game
+        game.new_episode()
+        done = game.is_episode_finished()
+        if not train:
+            with tqdm(total=math.ceil(TIMESTEPS_PER_EPISODE/SKIP_FRAMES)) as pbar:
+                while not done:
+                    done, stats = step(game, agent, actions, screen_preprocessor)
+                    pbar.update(1)
+        else:
+            experience_batch = collect_experience(game, agent, actions, intrinsic_model, screen_preprocessor)
+
+        # End of episode: compute aggregated statistics
+        total_extrinsic_reward = game.get_total_reward()
+        print(f"Extrinsic reward: {total_extrinsic_reward:.4f}")
+
+        if save_weights and (((ep % WEIGHTS_SAVE_FREQUENCY) == 0) or (ep == (tot_episodes-1))):
+            do_save_weights_and_logs(intrinsic_model, agent, extrinsic_rewards, ep, task, game_map)
+
+    # End of game
+    time_end = time.time()
+    print(f"Task finished. It took {time_end-time_start:.4f} seconds.")
+
+
+if __name__ == '__main__':
+    # Collect args
+    args = parse_args()
+
+    # Create folders for models and logs
+    os.makedirs(os.path.join('models', 'ac_rnd'), exist_ok=True)
+    os.makedirs(os.path.join('models', 'ac_no_rnd'), exist_ok=True)
+    os.makedirs(os.path.join('models', 'RND'), exist_ok=True)
+    os.makedirs(os.path.join('models', 'logs_rnd'), exist_ok=True)
+
+    # Check if a GPU is available for training
+    if len(tf.config.list_physical_devices('GPU')) > 0:
+        print(f"A GPU is available: {tf.config.list_physical_devices('GPU')}")
+        device = "/GPU:0"
+    else:
+        print("No GPU available: using CPU.")
+        device = "/CPU:0"
+    
+    # Create a DoomGame instance. 
+    # DoomGame represents an instance of the game and provides an interface for our agents to interact with it.
+    game = vzd.DoomGame()
+    # Load the chosen map using the configuration files
+    config_file = select_map(args)
+    game.load_config(config_file)
+    # Overwrite "window_visible" property if needed
+    game.set_window_visible(not args.no_render)
+    # Initialize the game.
+    game.init()
+
+    # Create the actions as one-hot encoded lists of pressed buttons:
+    actions = make_actions(len(Action))
+
+    # Start playing
+    with tf.device(device):
+        # Everything is executed in the context of the device (on GPU if available or on CPU).
+        # Initialize the agent.
+        agent = select_agent(args, actions)
+        # Instantiate the RND (Curiosity model)
+        intrinsic_model =   RND(len(Action), 
+                                tf.keras.optimizers.Adam(learning_rate=1e-4, clipnorm=CLIP_NO)) \
+                            if not args.no_curiosity else None
+        # Check if we need to load the weights for the agent and for the RND
+        if args.load_weights:
+            load_weights(intrinsic_model, agent, args.task, args.map)
+        # Play the game training the agents or evaluating the loaded weights.
+        play_game(game, agent, actions, intrinsic_model, 
+            train=(args.task == 'train' or args.task == 'pretrain'), 
+            save_weights=args.save_weights, start_episode=args.start_episode,
+            task=args.task, game_map=args.map)
+        # At the end, close the game
+        game.close()
