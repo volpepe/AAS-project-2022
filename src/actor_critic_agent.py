@@ -29,39 +29,47 @@ class BaselineActorCriticAgent(Agent):
         self.permutation = layers.Permute((3, 1, 2), input_shape=(3, 3, 32))
         self.reshape = layers.Reshape((32, 9))
         self.lstm  = layers.LSTM(64)
-        self.actor = layers.Dense(self.num_actions, activation='softmax')        # Produce probabilities
-        self.critic = layers.Dense(1)                                            # Produce the state-value directly
+        self.dense = layers.Dense(64)
+        self.flatten = layers.Flatten()
+        self.actor = layers.Dense(self.num_actions)        # Produce logits
+        self.critic = layers.Dense(1)                      # Produce the state-value directly
 
-    def call(self, inputs: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+    def call(self, inputs: tf.Tensor, lstm_active=True) -> Tuple[tf.Tensor, tf.Tensor]:
         # Input is a 1x42x42x4 sequence of images. We first apply some convolutions (1 is the batch size)
         #  1x3x3x32 <- 1x6x6x16 <- 1x11x11x16 <- 1x21x21x8 <- 1x42x42x4
         x = self.conv4(self.conv3(self.conv2(self.conv1(inputs))))
         x = self.dropout(x)
-        # Transformation to connect the convolutional network to the LSTM
-        #     1x32x9   <-   1x32x3x3
-        x = self.reshape(self.permutation(x))
-        # We use an LSTM to process the sequence
-        x = self.lstm(x)                                # 1x64
+        if lstm_active:
+            # Transformation to connect the convolutional network to the LSTM
+            #     1x32x9   <-   1x32x3x3
+            x = self.reshape(self.permutation(x))
+            # We use an LSTM to process the sequence
+            x = self.lstm(x)                                # 1x64
+        else:
+            x = self.flatten(x)
+            x = self.dense(x)
         x = self.dropout(x)
         # Then we produce the policy values
-        action_probs = self.actor(x)                    # 1xnum_actions
+        action_logits = self.actor(x)                    # 1xnum_actions
+        action_probs  = tf.nn.softmax(action_logits)     # 1xnum_actions probabilities
         # Avoid producing a tensor containing probability 0 for some actions.
         action_probs = tf.clip_by_value(action_probs, 1e-10, 1.0)
         # ... and the state value.
         state_value = self.critic(x)                    # 1x1
-        return action_probs, state_value
+        return action_logits, action_probs, state_value
 
-    def choose_action(self, state:State, training=False) -> Dict:
-        action_probs, state_value = self(tf.expand_dims(tf.cast(state.repr, tf.float32), axis=0), training=training)
+    def choose_action(self, state:State, training=False, lstm_active=True) -> Dict:
+        action_logits, action_probs, state_value = self(tf.expand_dims(tf.cast(state.repr, tf.float32), axis=0), 
+            training=training, lstm_active=lstm_active)
         # Sample from the actions probability distribution
-        action = tf.random.categorical(action_probs, 1)
+        action = tf.random.categorical(action_logits, 1)
         return {
             'action': Action(action.numpy()[0]),
             'policy': action_probs[0],
             'value' : state_value[0]
         }
 
-    def compute_loss(self, st:State, a:Dict, st1:State, r:tf.Tensor, a1:Dict, done:bool, iteration:int, tape:tf.GradientTape):
+    def compute_loss(self, st:State, a:Dict, st1:State, r:tf.Tensor, a1:Dict, done:bool, iteration:int, tape:tf.GradientTape, lstm_active:bool=True):
         """
         In actor critic with baseline, the update is computed in this way:
         - We call delta the difference between the immediate reward (the sum of intrinsic and extrinsic)
@@ -96,7 +104,7 @@ class BaselineActorCriticAgent(Agent):
             with tape.stop_recording():
                 # Do not record this operation in the gradient tape, we don't want to compute the gradient
                 # of this second function call.
-                v_st1_pred = self.choose_action(st, training=False)['value']
+                v_st1_pred = self.choose_action(st1, training=False, lstm_active=lstm_active)['value']
         else:
             v_st1_pred = tf.zeros((1,))
         # Compute delta
@@ -110,5 +118,4 @@ class BaselineActorCriticAgent(Agent):
         entropy_loss = -tf.reduce_sum(a_log_probs*a_probs)
         # Total loss
         total_loss = tf.reduce_sum(actor_loss + critic_loss + SIGMA*entropy_loss)
-        self.add_loss(lambda : total_loss)
-        return tf.reduce_sum(self.losses)
+        return tf.reduce_sum(self.losses) + total_loss
