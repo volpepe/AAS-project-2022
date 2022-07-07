@@ -243,10 +243,10 @@ def select_agent(args, actions):
     agent = args.agent
     if agent == 'random':
         return Agent(len(actions),
-            tf.keras.optimizers.Adam(learning_rate=1e-3, clipnorm=CLIP_NO))
+            tf.keras.optimizers.Adam(learning_rate=1e-4, clipnorm=CLIP_NO))
     if agent == 'actor_critic':
         return BaselineActorCriticAgent(len(actions), 
-            tf.keras.optimizers.Adam(learning_rate=1e-3, clipnorm=CLIP_NO))
+            tf.keras.optimizers.Adam(learning_rate=1e-4, clipnorm=CLIP_NO))
     # If we arrive here we have chosen something not implemented
     raise NotImplementedError
 
@@ -315,7 +315,7 @@ if __name__ == '__main__':
         # Instantiate the ICM (Curiosity model)
         curiosity_model =   ICM(len(Action), 
                                 tf.keras.optimizers.Adam(learning_rate=1e-3, clipnorm=CLIP_NO)) \
-                            if not args.no_curiosity else None
+                            if not args.no_intrinsic else None
         # Check if we need to load the weights for the agent and for the ICM
         if args.load_weights:
             load_weights(curiosity_model, agent, args.task, args.map)

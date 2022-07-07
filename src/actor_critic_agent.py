@@ -21,12 +21,12 @@ class BaselineActorCriticAgent(Agent):
         self.num_actions = num_actions
         self.optimizer = optimizer
         self.discount = discount
-        self.conv1 = layers.Conv2D(filters=8, kernel_size=3, strides=(2,2), padding='same', activation='relu')  # Original: 32 filters, elu activation
-        self.conv2 = layers.Conv2D(filters=16, kernel_size=3, strides=(2,2), padding='same', activation='relu') 
-        self.conv3 = layers.Conv2D(filters=16, kernel_size=3, strides=(2,2), padding='same', activation='relu')   
-        self.conv4 = layers.Conv2D(filters=32, kernel_size=3, strides=(2,2), padding='same', activation='relu')
-        self.dropout = layers.Dropout(0.5)
-        self.permutation = layers.Permute((3, 1, 2), input_shape=(1, 3, 3, 32))
+        self.conv1 = layers.Conv2D(filters=8, kernel_size=3, strides=(2,2), padding='same', activation='relu', kernel_regularizer=tf.keras.regularizers.L2(0.01))  # Original: 32 filters, elu activation
+        self.conv2 = layers.Conv2D(filters=16, kernel_size=3, strides=(2,2), padding='same', activation='relu', kernel_regularizer=tf.keras.regularizers.L2(0.01)) 
+        self.conv3 = layers.Conv2D(filters=16, kernel_size=3, strides=(2,2), padding='same', activation='relu', kernel_regularizer=tf.keras.regularizers.L2(0.01))   
+        self.conv4 = layers.Conv2D(filters=32, kernel_size=3, strides=(2,2), padding='same', activation='relu', kernel_regularizer=tf.keras.regularizers.L2(0.01))
+        self.dropout = layers.Dropout(0.2)
+        self.permutation = layers.Permute((3, 1, 2), input_shape=(3, 3, 32))
         self.reshape = layers.Reshape((32, 9))
         self.lstm  = layers.LSTM(64)
         self.actor = layers.Dense(self.num_actions, activation='softmax')        # Produce probabilities
@@ -42,6 +42,7 @@ class BaselineActorCriticAgent(Agent):
         x = self.reshape(self.permutation(x))
         # We use an LSTM to process the sequence
         x = self.lstm(x)                                # 1x64
+        x = self.dropout(x)
         # Then we produce the policy values
         action_probs = self.actor(x)                    # 1xnum_actions
         # Avoid producing a tensor containing probability 0 for some actions.
@@ -102,11 +103,12 @@ class BaselineActorCriticAgent(Agent):
         target = r + self.discount*v_st1_pred
         delta = target - v_st_pred
         # Actor loss
-        actor_loss = tf.reduce_sum(self.discount**iteration*delta*-a_log_probs*a_mask)
+        actor_loss = -tf.reduce_sum(delta*a_log_probs*a_mask)
         # Critic loss
         critic_loss = tf.keras.losses.huber(target, v_st_pred, delta=1.0)
         # Entropy loss
         entropy_loss = -tf.reduce_sum(a_log_probs*a_probs)
         # Total loss
-        total_loss = tf.reduce_sum(actor_loss + 0.5 * critic_loss + SIGMA*entropy_loss)
-        return total_loss
+        total_loss = tf.reduce_sum(actor_loss + critic_loss + SIGMA*entropy_loss)
+        self.add_loss(lambda : total_loss)
+        return tf.reduce_sum(self.losses)
