@@ -62,7 +62,7 @@ def get_next_state(state_manager:StateManager, prev_screen):
         # Get next image from the game
         next_screen = game.get_state().screen_buffer
     # Create the next state
-    next_state = state_manager.get_current_state(next_screen)
+    next_state = state_manager.get_virtual_state(next_screen)
     return done, next_state
 
 
