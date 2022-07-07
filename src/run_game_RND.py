@@ -3,7 +3,7 @@ from gc import collect
 import vizdoom as vzd
 # Common imports
 import os
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple, Union
 from collections import deque
 import time
 import math
@@ -133,58 +133,78 @@ def get_next_screen(default_screen_shape):
         next_screen = game.get_state().screen_buffer
     return done, next_screen
 
-def step(game:vzd.DoomGame, agent:Agent, actions:List, screen_preprocessor:RNDScreenPreprocessor) -> Tuple[bool, Dict]:
+def test_step(game:vzd.DoomGame, agent:Agent, actions:List, 
+            screen_preprocessor:RNDScreenPreprocessor) -> Tuple[bool, Dict]:
     # Obtain the state from the game (the image on screen)
     screen = game.get_state().screen_buffer
-    # Normalize, shrink, convert to grayscale
-    state = screen_preprocessor.preprocess_for_policy_net(screen)
+    # Append the frame to screen preprocessor
+    screen_preprocessor.append_new_screen(screen)
+    # Obtain preprocessed state for agent
+    state = screen_preprocessor.get_state_for_policy_net(screen)
     # Let the agent choose the action from the State
     action = agent.choose_action(state, training=False)['action']
     # Apply the action on the game and get the extrinsic reward.
     extrinsic_reward = game.make_action(actions[action.value], SKIP_FRAMES)
-    done, _ = get_next_screen(screen.shape)
+    done = game.is_episode_finished()
     return done, {
         'extrinsic_reward': extrinsic_reward,
     }
 
-def collect_experience(game:vzd.DoomGame, agent:Agent, actions:List, 
-                       intrinsic_model:RND, screen_preprocessor:RNDScreenPreprocessor):
-    # Initialize experience batch
-    experience_batch = {
-        'at'  : deque([]),
-        'et'  : deque([]),
-        'it'  : deque([])
-    }
+def train_step(game:vzd.DoomGame, agent:Agent, actions:List, 
+            intrinsic_model:Union[RND,None], 
+            screen_preprocessor:RNDScreenPreprocessor,
+            iteration:int=1):
+    # Obtain the state from the game (the image on screen)
+    screen = game.get_state().screen_buffer
+    # Append the frame to screen preprocessor
+    screen_preprocessor.append_new_screen(screen)
+    # Get state from preprocessor
+    policy_state = screen_preprocessor.preprocess_for_policy_net(screen)
     # Open gradient tape to record neural network operations and compute gradients later
     with tf.GradientTape(persistent=True) as tape:
-        # Collecting experience for training
-        with tqdm(total=math.ceil(TIMESTEPS_PER_EPISODE/SKIP_FRAMES)) as pbar:
-            while not done:
-                with tape.stop_recording():
-                    # Obtain the state from the game (the image on screen)
-                    screen = game.get_state().screen_buffer
-                    # Normalize, shrink, convert to grayscale
-                    policy_state = screen_preprocessor.preprocess_for_policy_net(screen)
-                # Let the agent choose the action from the State. This operation is recorded in the tape.
-                action = agent.choose_action(policy_state, training=True)
-                with tape.stop_recording():
-                    # Apply the action on the game and get the extrinsic reward.
-                    extrinsic_reward = game.make_action(actions[action['action']], SKIP_FRAMES)
-                    done, next_screen = get_next_screen(screen.shape)
-                    # Also, preprocess the next screen and pass it to the RND for computing the intrinsic reward
-                    next_state_rnd = screen_preprocessor.preprocess_for_rnd(next_screen)
-                # Record on tape the next forward passes into the intrinsic model and the calculation of the intrinsic reward.
-                gt_state_rnd, pred_state_rnd = intrinsic_model(tf.expand_dims(next_state_rnd, axis=0))
-                # Compute MSE between the two outputs
-                intrinsic_reward = tf.keras.losses.MeanSquaredError()(gt_state_rnd, pred_state_rnd)
-                with tape.stop_recording():
-                    experience_batch['at'].append(action)
-                    experience_batch['et'].append(extrinsic_reward)
-                    experience_batch['it'].append(intrinsic_reward)
-                    pbar.update(1)
-    
-    # TODO: COMPUTE LOSSES AND WEIGHT UPDATES
-    # TODO: FINISH IMPLEMENTATION OF RND
+        # Let the agent choose the action from the State. This operation is recorded in the tape.
+        action = agent.choose_action(policy_state, training=True)
+        # Stop recording operations to compute the extrinsic reward and get the next state.
+        with tape.stop_recording():
+            # Apply the action on the game and get the extrinsic reward.
+            extrinsic_reward = game.make_action(actions[action['action']], SKIP_FRAMES)
+            done, next_screen = get_next_screen(screen.shape)
+            # We don't append the next screen to the buffers yet, we just need to process it
+            policy_next_state = screen_preprocessor.get_virtual_state_for_policy_net(next_screen)
+            if intrinsic_model is not None:
+                # Also, preprocess the next screen and pass it to the RND for computing the intrinsic reward
+                next_state_rnd = screen_preprocessor.preprocess_for_rnd(next_screen)
+        if intrinsic_model is not None:
+            # Record on tape the next forward passes into the intrinsic model and the calculation of the intrinsic reward.
+            gt_state_rnd, pred_state_rnd = intrinsic_model(tf.expand_dims(next_state_rnd, axis=0))
+            # Intrinsic reward is sum of squared differences betweeen the ground truth from the untrained
+            # network and the predictor's output.
+            intrinsic_reward = tf.reduce_sum(tf.math.pow(gt_state_rnd - pred_state_rnd, 2))
+        else:
+            intrinsic_reward = tf.constant(0.0)
+        # Sum rewards
+        total_reward = intrinsic_reward + tf.clip_by_value(extrinsic_reward, -1.0, 1.0)
+        # Compute the loss for the agent
+        agent_loss = agent.compute_loss(policy_state, action, policy_next_state, total_reward, {}, done, iteration, tape)
+        # Compute the loss for the RND module (MSE)
+        rnd_loss = tf.keras.losses.mean_squared_error(gt_state_rnd, pred_state_rnd)
+        
+    # Compute gradients and updates
+    if intrinsic_model is not None:
+        gradients_intrinsic = tape.gradient(rnd_loss, intrinsic_model.trainable_weights)    
+        intrinsic_model.optimizer.apply_gradients(zip(gradients_intrinsic, intrinsic_model.trainable_weights))
+    gradients_agent = tape.gradient(agent_loss, agent.trainable_weights)
+    agent.optimizer.apply_gradients(zip(gradients_agent, agent.trainable_weights))
+    # Remove the tape
+    del tape
+    return done, {      # Return if episode is done and some statistics about the step
+        'extrinsic_reward': extrinsic_reward, 
+        'total_reward'    : total_reward.numpy(),
+        'agent_loss'      : agent_loss.numpy(),
+        'intrinsic_reward': intrinsic_reward if intrinsic_model is not None else None, 
+        'intrinsic_loss'  : rnd_loss.numpy() if intrinsic_model is not None else None
+    }
+
 
 def play_game(game:vzd.DoomGame, agent:Agent, actions:List, intrinsic_model:RND, train:bool=True,
               save_weights:bool=False, start_episode:int=0, task:str='train', game_map:str='dense'):
@@ -201,7 +221,7 @@ def play_game(game:vzd.DoomGame, agent:Agent, actions:List, intrinsic_model:RND,
     # Play a few steps to initialize the observation normalization parameters
     game.new_episode()
     for i in range(M):
-        screen_preprocessor.preprocess_for_rnd(game.get_state().screen_buffer)
+        screen_preprocessor.append_new_screen(game.get_state().screen_buffer)
         at = np.random.randint(0, len(actions))
         game.make_action(at, SKIP_FRAMES)
     # Start counting the playing time
@@ -213,16 +233,20 @@ def play_game(game:vzd.DoomGame, agent:Agent, actions:List, intrinsic_model:RND,
         # Start new episode of the game
         game.new_episode()
         done = game.is_episode_finished()
-        if not train:
-            with tqdm(total=math.ceil(TIMESTEPS_PER_EPISODE/SKIP_FRAMES)) as pbar:
-                while not done:
-                    done, stats = step(game, agent, actions, screen_preprocessor)
-                    pbar.update(1)
-        else:
-            experience_batch = collect_experience(game, agent, actions, intrinsic_model, screen_preprocessor)
+        ep_timestep = 0
+        with tqdm(total=math.ceil(TIMESTEPS_PER_EPISODE/SKIP_FRAMES)) as pbar:
+            while not done:
+                if not train:
+                    done, stats = test_step(game, agent, actions, screen_preprocessor)
+                else:
+                    done, stats = train_step(game, agent, actions, intrinsic_model, screen_preprocessor, ep_timestep)
+                pbar.update(1)
+                ep_timestep += 1
+                global_timestep += 1
 
         # End of episode: compute aggregated statistics
         total_extrinsic_reward = game.get_total_reward()
+        extrinsic_rewards.append(total_extrinsic_reward)
         print(f"Extrinsic reward: {total_extrinsic_reward:.4f}")
 
         if save_weights and (((ep % WEIGHTS_SAVE_FREQUENCY) == 0) or (ep == (tot_episodes-1))):
