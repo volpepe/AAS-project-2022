@@ -14,7 +14,8 @@ from tqdm import tqdm
 # Our modules
 from agent import Agent
 from actor_critic_agent import BaselineActorCriticAgent
-from state import RNDIntrinsicRewardNormalizer, RNDScreenPreprocessor
+from curiosity import RND
+from state import RNDScreenPreprocessor
 from action import Action
 # Variables
 from variables import *
@@ -68,10 +69,10 @@ def select_agent(args, actions):
     agent = args.agent
     if agent == 'random':
         return Agent(len(actions),
-            tf.keras.optimizers.Adam(learning_rate=1e-3, clipnorm=CLIP_NO))
+            tf.keras.optimizers.Adam(learning_rate=1e-4, clipnorm=CLIP_NO))
     if agent == 'actor_critic':
         return BaselineActorCriticAgent(len(actions), 
-            tf.keras.optimizers.Adam(learning_rate=1e-3, clipnorm=CLIP_NO))
+            tf.keras.optimizers.Adam(learning_rate=1e-4, clipnorm=CLIP_NO))
     # If we arrive here we have chosen something not implemented
     raise NotImplementedError
 
@@ -140,7 +141,7 @@ def test_step(game:vzd.DoomGame, agent:Agent, actions:List,
     # Append the frame to screen preprocessor
     screen_preprocessor.append_new_screen(screen)
     # Obtain preprocessed state for agent
-    state = screen_preprocessor.get_state_for_policy_net(screen)
+    state = screen_preprocessor.get_state_for_policy_net()
     # Let the agent choose the action from the State
     action = agent.choose_action(state, training=False)['action']
     # Apply the action on the game and get the extrinsic reward.
@@ -186,8 +187,9 @@ def train_step(game:vzd.DoomGame, agent:Agent, actions:List,
         total_reward = intrinsic_reward + tf.clip_by_value(extrinsic_reward, -1.0, 1.0)
         # Compute the loss for the agent
         agent_loss = agent.compute_loss(policy_state, action, policy_next_state, total_reward, {}, done, iteration, tape)
-        # Compute the loss for the RND module (MSE)
-        rnd_loss = tf.keras.losses.mean_squared_error(gt_state_rnd, pred_state_rnd)
+        if intrinsic_model is not None:
+            # Collect the loss for the RND module (MSE)
+            rnd_loss = intrinsic_model.losses
         
     # Compute gradients and updates
     if intrinsic_model is not None:
