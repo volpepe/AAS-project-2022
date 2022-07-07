@@ -162,3 +162,33 @@ class InverseModel(Layer):
         # Dense layers for action prediction
         pred_at = self.dense2(self.dense1(e_states))      # [1, num_actions], probability distribution
         return pred_at
+
+
+class RND(Model):
+    '''
+    Implementation of the RND (Random Network Distillation) as a intrinsic reward module.
+
+    As the ICM, this module computes curiosity, an intrinsic reward for the agent that is
+    added to the extrinsic reward it receives at each time step, but may not receive for a 
+    long sequence of steps due to the sparsity of rewards.
+    An agent that is curious is able to navigate the environment effectively even though 
+    no explicit rewards are given to it.
+
+    Differently from the ICM, where the state representations are learnt, we let a randomly
+    initialized and untrained network produce the representations for the state. In this way
+    the representation for state St will always be the same.
+
+    This mechanism reduces the stochasticity of the curiosity module in a good way: indeed
+    learning to represent a state from the state itself can lead to the noisy-TV effect, where
+    an agent becomes overly curious over noise and becomes unable to represent the state 
+    effectively.
+
+    Instead, we let a predictor network try to predict the output of the random network. 
+    This is a process called distillation: the predictor tries to distill the weights of the
+    random network. In this way we have a mechanism to produce errors and thus rewards (the 
+    difference between the two representations), and we make sure that the model is perfectly
+    able to reproduce the representation by using the same network configuration for both
+    networks.
+    '''
+    def __init__(self) -> None:
+        super(RND, self).__init__()
