@@ -15,7 +15,7 @@ from tqdm import tqdm
 from agent import Agent
 from actor_critic_agent import BaselineActorCriticAgent
 from curiosity import RND
-from state import RNDScreenPreprocessor
+from state import RNDScreenPreprocessor, State
 from action import Action
 # Variables
 from variables import *
@@ -128,7 +128,7 @@ def get_next_screen(default_screen_shape):
     if done:
         # Final state reached: create a simple black image as next image 
         # (must be uint8 for PIL to work)
-        next_screen = np.zeros(default_screen_shape.shape, dtype=np.uint8)
+        next_screen = np.zeros(default_screen_shape, dtype=np.uint8)
     else:
         # Get next image from the game
         next_screen = game.get_state().screen_buffer
@@ -160,18 +160,18 @@ def train_step(game:vzd.DoomGame, agent:Agent, actions:List,
     # Append the frame to screen preprocessor
     screen_preprocessor.append_new_screen(screen)
     # Get state from preprocessor
-    policy_state = screen_preprocessor.preprocess_for_policy_net(screen)
+    policy_state = State(screen_preprocessor.get_state_for_policy_net())
     # Open gradient tape to record neural network operations and compute gradients later
     with tf.GradientTape(persistent=True) as tape:
         # Let the agent choose the action from the State. This operation is recorded in the tape.
-        action = agent.choose_action(policy_state, training=True)
+        action = agent.choose_action(policy_state, training=True, lstm_active=False)
         # Stop recording operations to compute the extrinsic reward and get the next state.
         with tape.stop_recording():
             # Apply the action on the game and get the extrinsic reward.
-            extrinsic_reward = game.make_action(actions[action['action']], SKIP_FRAMES)
+            extrinsic_reward = game.make_action(actions[action['action'].value], SKIP_FRAMES)
             done, next_screen = get_next_screen(screen.shape)
             # We don't append the next screen to the buffers yet, we just need to process it
-            policy_next_state = screen_preprocessor.get_virtual_state_for_policy_net(next_screen)
+            policy_next_state = State(screen_preprocessor.get_virtual_state_for_policy_net(next_screen))
             if intrinsic_model is not None:
                 # Also, preprocess the next screen and pass it to the RND for computing the intrinsic reward
                 next_state_rnd = screen_preprocessor.preprocess_for_rnd(next_screen)
@@ -186,10 +186,11 @@ def train_step(game:vzd.DoomGame, agent:Agent, actions:List,
         # Sum rewards
         total_reward = intrinsic_reward + tf.clip_by_value(extrinsic_reward, -1.0, 1.0)
         # Compute the loss for the agent
-        agent_loss = agent.compute_loss(policy_state, action, policy_next_state, total_reward, {}, done, iteration, tape)
+        agent_loss = agent.compute_loss(policy_state, action, policy_next_state, total_reward, 
+            {}, done, iteration, tape, lstm_active=False)
         if intrinsic_model is not None:
             # Collect the loss for the RND module (MSE)
-            rnd_loss = intrinsic_model.losses
+            rnd_loss = tf.reduce_sum(intrinsic_model.losses)
         
     # Compute gradients and updates
     if intrinsic_model is not None:
@@ -213,19 +214,10 @@ def play_game(game:vzd.DoomGame, agent:Agent, actions:List, intrinsic_model:RND,
     global_timestep = 0
     # Create some deques for statistics about the game
     extrinsic_rewards = deque([])
-    if intrinsic_model is not None:
-        intrinsic_rewards = deque([])
-    total_rewards     = deque([])
     # Select maximum number of epochs based on task
     tot_episodes = choose_episodes(task)
     # Instantiate screen preprocessor
     screen_preprocessor = RNDScreenPreprocessor()
-    # Play a few steps to initialize the observation normalization parameters
-    game.new_episode()
-    for i in range(M):
-        screen_preprocessor.append_new_screen(game.get_state().screen_buffer)
-        at = np.random.randint(0, len(actions))
-        game.make_action(at, SKIP_FRAMES)
     # Start counting the playing time
     time_start = time.time()
     # Loop over episodes
@@ -242,9 +234,10 @@ def play_game(game:vzd.DoomGame, agent:Agent, actions:List, intrinsic_model:RND,
                     done, stats = test_step(game, agent, actions, screen_preprocessor)
                 else:
                     done, stats = train_step(game, agent, actions, intrinsic_model, screen_preprocessor, ep_timestep)
-                pbar.update(1)
                 ep_timestep += 1
                 global_timestep += 1
+                pbar.update(1)
+                pbar.set_description(f"Global timestep: {global_timestep}: " + str({el: f'{stats[el]:.5f}' for el in stats}))
 
         # End of episode: compute aggregated statistics
         total_extrinsic_reward = game.get_total_reward()
@@ -297,9 +290,8 @@ if __name__ == '__main__':
         # Initialize the agent.
         agent = select_agent(args, actions)
         # Instantiate the RND (Curiosity model)
-        intrinsic_model =   RND(len(Action), 
-                                tf.keras.optimizers.Adam(learning_rate=1e-4, clipnorm=CLIP_NO)) \
-                            if not args.no_curiosity else None
+        intrinsic_model =   RND(tf.keras.optimizers.Adam(learning_rate=1e-4, clipnorm=CLIP_NO)) \
+                            if not args.no_intrinsic else None
         # Check if we need to load the weights for the agent and for the RND
         if args.load_weights:
             load_weights(intrinsic_model, agent, args.task, args.map)

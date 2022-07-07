@@ -43,5 +43,3 @@ LAMBDA  = 0.1        # Actor-critic loss coefficient
 CLIP_RE = 0.1        # Clip the intrinsic reward
 ICM_LW  = 10.0       # Weight of the ICM loss with respect to the actor's loss
 #############
-### RND PARAMS
-M = 50
