@@ -3,7 +3,7 @@ import math
 import numpy as np
 from PIL import Image
 
-from variables import PREPROCESSING_SIZE, PREPROCESSING_SIZE_RND, STACK_FRAMES
+from variables import M, PREPROCESSING_SIZE, PREPROCESSING_SIZE_RND, STACK_FRAMES
 
 class State():
     def __init__(self, state_representation: np.ndarray) -> None:
@@ -48,7 +48,7 @@ class StateManager():
         state St+1.
         '''
         img = self.preprocess_image(image.transpose(1,2,0))
-        return State(np.stack(list(self.screen_buffer[1:]) + [img], axis=1))
+        return State(np.stack(list(self.screen_buffer)[:-1] + [img], axis=-1))
 
 
 # Same class but specialized for RND
@@ -73,12 +73,12 @@ class RNDScreenPreprocessor():
         img = self.preprocess_for_policy_net(screen)
         self.preprocessed_screen_buffer.append(img)  # Add pre-processed image to the buffer
 
-    def get_state_for_policy_net(self, screen:np.ndarray):
+    def get_state_for_policy_net(self):
         # Return stacked buffer (last 4 images)
         return np.stack(self.screen_buffer, axis=-1) 
 
     def get_virtual_state_for_policy_net(self, screen:np.ndarray):
-        return np.stack(list(self.screen_buffer[1:]) + [self.preprocess_for_policy_net(screen)], axis=-1)
+        return np.stack(list(self.screen_buffer)[:-1] + [self.preprocess_for_policy_net(screen)], axis=-1)
 
     def get_state_for_rnd(self, screen:np.ndarray):
         return self.preprocess_for_rnd(screen)      # Simply pre-process the screen
