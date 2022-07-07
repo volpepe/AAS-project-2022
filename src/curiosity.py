@@ -191,17 +191,18 @@ class RND(Model):
     able to reproduce the representation by using the same network configuration for both
     networks.
     '''
-    def __init__(self) -> None:
+    def __init__(self, optimizer) -> None:
         super(RND, self).__init__()
-        self.target = Target(trainable=False)
-        self.predictor = Predictor(trainable=True)
+        self.target = Target()
+        self.predictor = Predictor()
+        self.optimizer = optimizer
         
     def call(self, inputs) -> Tuple[tf.Tensor, tf.Tensor]:
         # Obtain the encoding by the target and the predictor
         pred_s = self.predictor(inputs)
         target_s  = self.target(inputs)
         # The loss of the model is compute as the MSE between these two
-        loss = losses.mean_squared_error(target_s, pred_s)
+        loss = tf.reduce_sum(losses.mean_squared_error(target_s, pred_s))
         self.add_loss(loss)
         # Return the two encodings in order to compute the intrinsic reward
         return pred_s, target_s
@@ -214,13 +215,12 @@ class Predictor(Layer):
     '''
     def __init__(self) -> None:
         super().__init__()
-        self.conv1   = layers.Conv2D(filters=32, kernel_size=8, strides=(4,4), padding='same', activation='relu', kernel_regularizer=regularizers.L2(0.01))    # Original has 32 filters and elu activation
-        self.conv2   = layers.Conv2D(filters=64, kernel_size=4, strides=(2,2), padding='same', activation='relu', kernel_regularizer=regularizers.L2(0.01))
-        self.conv3   = layers.Conv2D(filters=64, kernel_size=3, strides=(1,1), padding='same', activation='relu', kernel_regularizer=regularizers.L2(0.01))
+        self.conv1   = layers.Conv2D(filters=8,  kernel_size=4, strides=(4,4), padding='same', activation='relu', kernel_regularizer=regularizers.L2(0.01))    # Original has 32 filters and elu activation
+        self.conv2   = layers.Conv2D(filters=16, kernel_size=4, strides=(2,2), padding='same', activation='relu', kernel_regularizer=regularizers.L2(0.01))
+        self.conv3   = layers.Conv2D(filters=16, kernel_size=3, strides=(1,1), padding='same', activation='relu', kernel_regularizer=regularizers.L2(0.01))
         self.dropout = layers.Dropout(0.2)
-        self.dense1  = layers.Dense(256)
-        self.dense2  = layers.Dense(128)
-        self.dense3  = layers.Dense(512)
+        self.dense1  = layers.Dense(64)
+        self.dense2  = layers.Dense(256)
         self.flatten = layers.Flatten()
     
     def call(self, inputs) -> Tuple[tf.Tensor, tf.Tensor]:
@@ -234,8 +234,6 @@ class Predictor(Layer):
         x = self.dense1(x)
         x = self.dropout(x)
         x = self.dense2(x)
-        x = self.dropout(x)
-        x = self.dense3(x)
         return x
 
 
@@ -245,12 +243,12 @@ class Target(Layer):
     the distillation
     '''
     def __init__(self) -> None:
-        super().__init__()
+        super().__init__(trainable=False)
         self.trainable = False
-        self.conv1   = layers.Conv2D(filters=32, kernel_size=8, strides=(4,4), padding='same', activation='relu')    # Original has 32 filters and elu activation
-        self.conv2   = layers.Conv2D(filters=64, kernel_size=4, strides=(2,2), padding='same', activation='relu')
-        self.conv3   = layers.Conv2D(filters=64, kernel_size=3, strides=(1,1), padding='same', activation='relu')
-        self.dense   = layers.Dense(512)
+        self.conv1   = layers.Conv2D(filters=8,  kernel_size=4, strides=(4,4), padding='same', activation='relu')    # Original has 32 filters and elu activation
+        self.conv2   = layers.Conv2D(filters=16, kernel_size=4, strides=(2,2), padding='same', activation='relu')
+        self.conv3   = layers.Conv2D(filters=16, kernel_size=3, strides=(1,1), padding='same', activation='relu')
+        self.dense   = layers.Dense(256)
         self.flatten = layers.Flatten()
     
     def call(self, inputs) -> Tuple[tf.Tensor, tf.Tensor]:
