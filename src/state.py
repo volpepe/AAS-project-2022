@@ -48,7 +48,7 @@ class StateManager():
         state St+1.
         '''
         img = self.preprocess_image(image.transpose(1,2,0))
-        return State(np.stack(list(self.screen_buffer)[:-1] + [img], axis=-1))
+        return State(np.stack(list(self.screen_buffer)[1:] + [img], axis=-1))
 
 
 # Same class but specialized for RND
@@ -75,7 +75,7 @@ class RNDScreenPreprocessor():
         return np.stack(self.preprocessed_screen_buffer, axis=-1) 
 
     def get_virtual_state_for_policy_net(self, screen:np.ndarray):
-        return np.stack(list(self.preprocessed_screen_buffer)[:-1] + [self.preprocess_for_policy_net(screen)], axis=-1)
+        return np.stack(list(self.preprocessed_screen_buffer)[1:] + [self.preprocess_for_policy_net(screen)], axis=-1)
 
     def preprocess_for_policy_net(self, screen:np.ndarray):
         img = screen.transpose(1,2,0)                # 3x480x640 --> 480x640x3
