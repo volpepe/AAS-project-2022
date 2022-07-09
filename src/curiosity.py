@@ -82,12 +82,10 @@ class EncodingLayer(Layer):
     '''
     def __init__(self) -> None:
         super().__init__()
-        self.conv1   = layers.Conv2D(filters=32, kernel_size=3, strides=(2,2), padding='same', activation='relu', kernel_regularizer=regularizers.L2(0.01))    # Original has 32 filters and elu activation
-        self.conv2   = layers.Conv2D(filters=32, kernel_size=3, strides=(2,2), padding='same', activation='relu', kernel_regularizer=regularizers.L2(0.01))
-        self.conv3   = layers.Conv2D(filters=32, kernel_size=3, strides=(2,2), padding='same', activation='relu', kernel_regularizer=regularizers.L2(0.01))
-        self.conv4   = layers.Conv2D(filters=32, kernel_size=3, strides=(2,2), padding='same', activation='relu', kernel_regularizer=regularizers.L2(0.01))
-        self.dense   = layers.Dense(288)
-        self.dropout = layers.Dropout(0.2)
+        self.conv1   = layers.Conv2D(filters=32, kernel_size=3, strides=(2,2), padding='same', activation='elu', kernel_regularizer=regularizers.L2(0.01))    # Original has 32 filters and elu activation
+        self.conv2   = layers.Conv2D(filters=32, kernel_size=3, strides=(2,2), padding='same', activation='elu', kernel_regularizer=regularizers.L2(0.01))
+        self.conv3   = layers.Conv2D(filters=32, kernel_size=3, strides=(2,2), padding='same', activation='elu', kernel_regularizer=regularizers.L2(0.01))
+        self.conv4   = layers.Conv2D(filters=32, kernel_size=3, strides=(2,2), padding='same', kernel_regularizer=regularizers.L2(0.01))
         self.flatten = layers.Flatten()
     
     def call(self, inputs) -> Tuple[tf.Tensor, tf.Tensor]:
@@ -95,8 +93,8 @@ class EncodingLayer(Layer):
         st, st1 = inputs
         # Compute encoding of state st and st1
         # 1x288 <- 1x3x3x32 <- 1x6x6x32 <- 1x11x11x32 <- 1x21x21x32 <- 1x42x42x4
-        e_st  = self.dense(self.flatten(self.conv4(self.dropout(self.conv3(self.conv2(self.dropout(self.conv1(st))))))))
-        e_st1 = self.dense(self.flatten(self.conv4(self.dropout(self.conv3(self.conv2(self.dropout(self.conv1(st1))))))))
+        e_st  = self.flatten(self.conv4(self.conv3(self.conv2(self.conv1(st)))))
+        e_st1 = self.flatten(self.conv4(self.conv3(self.conv2(self.conv1(st1)))))
         return e_st, e_st1
 
 
@@ -110,7 +108,7 @@ class ForwardModel(Layer):
         super().__init__(*args, **kwargs)
         self.num_actions = num_actions
         self.concat = layers.Concatenate(axis=1)
-        self.dense1 = layers.Dense(128, activation='relu')                                                           # Original is 256
+        self.dense1 = layers.Dense(256, activation='elu')     # Original is 256
         self.dense2 = layers.Dense(288)
 
     def call(self, inputs) -> tf.Tensor:
@@ -132,7 +130,7 @@ class InverseModel(Layer):
         super().__init__(*args, **kwargs)
         self.num_actions = num_actions
         self.concat  = layers.Concatenate(axis=1)
-        self.dense1  = layers.Dense(128, activation='relu')                                                          # Original is 256
+        self.dense1  = layers.Dense(256, activation='elu') # Original is 256
         self.dense2  = layers.Dense(self.num_actions, activation='softmax')
 
     def call(self, inputs) -> tf.Tensor:

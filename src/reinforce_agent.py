@@ -24,7 +24,6 @@ class BaselineREINFORCEAgent(Agent):
         self.conv2 = layers.Conv2D(filters=16, kernel_size=3, strides=(2,2), padding='same', activation='relu', kernel_regularizer=tf.keras.regularizers.L2(0.01)) 
         self.conv3 = layers.Conv2D(filters=16, kernel_size=3, strides=(2,2), padding='same', activation='relu', kernel_regularizer=tf.keras.regularizers.L2(0.01))   
         self.conv4 = layers.Conv2D(filters=32, kernel_size=3, strides=(2,2), padding='same', activation='relu', kernel_regularizer=tf.keras.regularizers.L2(0.01))
-        self.dropout = layers.Dropout(0.2)
         self.permutation = layers.Permute((3, 1, 2), input_shape=(3, 3, 32))
         self.reshape = layers.Reshape((32, 9))
         self.lstm  = layers.LSTM(64)
@@ -37,7 +36,6 @@ class BaselineREINFORCEAgent(Agent):
         # Input is a 1x42x42x4 sequence of images. We first apply some convolutions (1 is the batch size)
         #  1x3x3x32 <- 1x6x6x16 <- 1x11x11x16 <- 1x21x21x8 <- 1x42x42x4
         x = self.conv4(self.conv3(self.conv2(self.conv1(inputs))))
-        x = self.dropout(x)
         if lstm_active:
             # Transformation to connect the convolutional network to the LSTM
             #     1x32x9   <-   1x32x3x3
@@ -47,7 +45,6 @@ class BaselineREINFORCEAgent(Agent):
         else:
             x = self.flatten(x)
             x = self.dense(x)
-        x = self.dropout(x)
         # Then we produce the policy values
         action_logits = self.actor(x)                    # 1xnum_actions
         action_probs  = tf.nn.softmax(action_logits)     # 1xnum_actions probabilities
