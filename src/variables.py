@@ -35,11 +35,11 @@ LOGS_DIR = 'models/logs/{}_{}'
 
 CLIP_NO = 40.0       # Gradient norm clipping
 ### ICM PARAMS
-ETA     = 0.1        # Scaling factor for the intrinsic reward signal
+ETA     = 0.01       # Scaling factor for the intrinsic reward signal
 BETA    = 0.8        # Weight of the forward model loss against the inverse model loss
 GAMMA   = 0.99       # Discount for rewards
 SIGMA   = 0.01       # Entropy coefficient
-LAMBDA  = 0.1        # Actor-critic loss coefficient
-CLIP_RE = 0.1        # Clip the intrinsic reward
-ICM_LW  = 10.0       # Weight of the ICM loss with respect to the actor's loss
+LAMBDA  = 0.1        # Agent loss coefficient
+CLIP_RE = 1.0        # Clip the intrinsic reward
+ICM_LW  = 10.0       # Weight of the ICM loss with respect to the agent's loss
 #############

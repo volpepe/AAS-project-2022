@@ -69,10 +69,10 @@ def select_agent(args, actions):
     agent = args.agent
     if agent == 'random':
         return Agent(len(actions),
-            tf.keras.optimizers.Adam(learning_rate=1e-2, clipnorm=CLIP_NO))
+            tf.keras.optimizers.Adam(learning_rate=0.001))
     if agent == 'reinforce':
         return BaselineREINFORCEAgent(len(actions), 
-            tf.keras.optimizers.Adam(learning_rate=1e-2, clipnorm=CLIP_NO))
+            tf.keras.optimizers.Adam(learning_rate=0.001))
     # If we arrive here we have chosen something not implemented
     raise NotImplementedError
 
@@ -264,6 +264,11 @@ def train_step(game:vzd.DoomGame, agent:Agent, curiosity_model:Union[ICM,None],
         #
         #    `-(delta*log(action_probs))`
         #
+        # 4) We add an entropy loss to keep the probability distribution of the actions to 
+        #    be flat
+        #    
+        #   `entropy_loss = -reduce_sum(a_log_probs*a_probs)`
+        #
         # 4) Finally, we compute the update for the ICM. The ICM has already computed
         #    its losses in its forward passes while playing the episode so we simply 
         #    need to retrieve them.
@@ -279,19 +284,24 @@ def train_step(game:vzd.DoomGame, agent:Agent, curiosity_model:Union[ICM,None],
         # Critic loss
         critic_loss = tf.keras.losses.Huber()(
             v_st_pred, cumulative_rewards)
+        # Entropy loss
+        entropy_loss = -tf.reduce_sum(a_log_probs*a_probs)
         # Actor loss
         actor_loss = -tf.reduce_sum(tf.expand_dims(delta, axis=-1)*a_log_probs)
         # Total agent loss
-        agent_loss = tf.reduce_sum(actor_loss + critic_loss)
-        # ICM loss is `intrinsic_loss`
+        agent_loss = tf.reduce_sum(actor_loss + critic_loss + SIGMA * entropy_loss)
 
     # Update the critic and optionally the ICM
     if curiosity_model is not None:
+        # The agent loss does not depend on the weights of the inverse model.
+        total_trainable_weights = [x for x in curiosity_model.trainable_weights if 'inverse' not in x.name] + agent.trainable_weights
         gradients_intrinsic = tape.gradient(intrinsic_loss, curiosity_model.trainable_weights)    
         curiosity_model.optimizer.apply_gradients(zip(gradients_intrinsic, curiosity_model.trainable_weights))
-    gradients_agent = tape.gradient(agent_loss, agent.trainable_weights)    
-    agent.optimizer.apply_gradients(zip(gradients_agent, agent.trainable_weights))
-
+    else:
+        total_trainable_weights = agent.trainable_weights
+    gradients_agent = tape.gradient(agent_loss, total_trainable_weights)    
+    agent.optimizer.apply_gradients(zip(gradients_agent, total_trainable_weights))
+    del tape
     # After this update, we return the episode steps and list of rewards
     return episode_steps, rewards
 
@@ -374,7 +384,7 @@ if __name__ == '__main__':
         agent = select_agent(args, actions)
         # Instantiate the ICM (Curiosity model)
         curiosity_model =   ICM(len(Action), 
-                                tf.keras.optimizers.Adam(learning_rate=1e-2, clipnorm=CLIP_NO)) \
+                                tf.keras.optimizers.Adam(learning_rate=0.001)) \
                             if not args.no_intrinsic else None
         # Check if we need to load the weights for the agent and for the ICM
         if args.load_weights:
