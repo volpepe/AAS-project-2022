@@ -3,13 +3,12 @@ import tensorflow as tf
 from tensorflow.keras import layers
 from action import Action
 from state import State
-
 from agent import Agent
 from variables import GAMMA, SIGMA
 
-class BaselineActorCriticAgent(Agent):
+class BaselineREINFORCEAgent(Agent):
     """
-    Actor-critic network, taken from the curiosity paper.
+    REINFORCE-based network, implemented using the specifications of the curiosity paper.
 
     - Input: a 1x42x42x4 tensor representing the previous 4 42x42 stacked black-and-white frames from the game
     - Output: a tuple containing:
@@ -68,54 +67,3 @@ class BaselineActorCriticAgent(Agent):
             'policy': action_probs[0],
             'value' : state_value[0]
         }
-
-    def compute_loss(self, st:State, a:Dict, st1:State, r:tf.Tensor, a1:Dict, done:bool, iteration:int, tape:tf.GradientTape, lstm_active:bool=True):
-        """
-        In actor critic with baseline, the update is computed in this way:
-        - We call delta the difference between the immediate reward (the sum of intrinsic and extrinsic)
-          summed with the prediction of the value of the next state AND the prediction of the value of the
-          current state. 
-          
-          `delta = R + discount*V_pred(St+1) - V_pred(St)`      (if `St+1 `is terminal, then `V_pred(St+1)=0`)
-        
-        - The loss function for the actor is:
-          
-          `delta*-log(action_probs)`
-
-        - For the critic we use a DQN-like approach:
-          
-          `huber_loss(R + discount*V_pred(St+1), V_pred(St))`   (or `MSE`)
-
-        - To these losses, we add an entropy loss that helps the agent to produce smoother policies
-          
-          `-sum(action_probs*log(action_probs))`
-
-          We want to keep a high entropy, because it means that no value will dominate over the other unless
-          the model is very sure about its choice. It will keep the probability distribution "uncertain" letting
-          the agent try different things.
-        """
-        # Gather all variables we need
-        v_st_pred = a['value']
-        a_probs = a['policy']
-        a_log_probs = tf.math.log(a_probs)
-        a_mask = tf.one_hot(a['action'].value, depth=self.num_actions)     # Index of the action the agent chose
-        # Check if next state is final
-        if not done:
-            with tape.stop_recording():
-                # Do not record this operation in the gradient tape, we don't want to compute the gradient
-                # of this second function call.
-                v_st1_pred = self.choose_action(st1, training=False, lstm_active=lstm_active)['value']
-        else:
-            v_st1_pred = tf.zeros((1,))
-        # Compute delta
-        target = r + self.discount*v_st1_pred
-        delta = target - v_st_pred
-        # Actor loss
-        actor_loss = -tf.reduce_sum(delta*a_log_probs*a_mask)
-        # Critic loss
-        critic_loss = tf.keras.losses.huber(target, v_st_pred, delta=1.0)
-        # Entropy loss
-        entropy_loss = -tf.reduce_sum(a_log_probs*a_probs)
-        # Total loss
-        total_loss = tf.reduce_sum(actor_loss + critic_loss + SIGMA*entropy_loss)
-        return tf.reduce_sum(self.losses) + total_loss

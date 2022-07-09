@@ -21,7 +21,3 @@ class Agent(keras.Model):
             'action': Action(random.randint(0, len(Action)-1)),
             'policy': policy
         }
-
-    def compute_loss(self, st:State, a:Dict, st1:State, r:tf.Tensor, a1:Dict, 
-                     done:bool, iteration:int, tape:tf.GradientTape):
-        return tf.constant(0.0)
