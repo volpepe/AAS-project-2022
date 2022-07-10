@@ -56,7 +56,7 @@ class BaselineActorCritic(Agent):
             Tuple[State, float, bool]:
         # The play step for actor critic is very similar to the one of the random agent:
         # Add batch to state representation
-        input_tensor = tf.expand_dims(state.repr, axis=0)
+        input_tensor = tf.cast(tf.expand_dims(state.repr, axis=0), tf.float32)
         # Obtain the action logits, probabilities and state values
         action_logits, _, _ = self(input_tensor)
         # The action is chosen by sampling the action logits
