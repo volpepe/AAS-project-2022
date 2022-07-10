@@ -14,7 +14,7 @@ from tqdm import trange
 # Our modules
 from agent import Agent
 from DQN import DQN
-from actor_critic import BaselineActorCritic
+from actor_critic import BaselineA2C
 from state import State, StateManager
 # Variables
 from variables import *
@@ -23,8 +23,8 @@ from variables import *
 def parse_args():
     args = argparse.ArgumentParser()
     args.add_argument('-a', '--algorithm', default='random', 
-        choices=['random','reinforce', 'actor_critic','dqn'], type=str,
-        help='The type of algorithm to use (random, reinforce, actor_critic, dqn). Default is random.')
+        choices=['random','reinforce', 'a2c','dqn'], type=str,
+        help='The type of algorithm to use (random, reinforce, a2c, dqn). Default is random.')
     args.add_argument('-s', '--save_weights', action='store_true', 
         help='If active, the new weights will be saved.')
     args.add_argument('-l', '--load_weights', action='store_true',
@@ -42,9 +42,9 @@ def select_agent(args, num_actions:int) -> Tuple[Agent, str]:
     if agent == 'random':
         return Agent(num_actions, 
             optimizer=tf.keras.optimizers.Adam(learning_rate=LR, clipnorm=CLIP_NO)), ''
-    if agent == 'reinforce' or agent == 'actor_critic':
+    if agent == 'reinforce' or agent == 'a2c':
         # The two algorithms share some similarities, so they are implemented with the same agent
-        return BaselineActorCritic(num_actions, 
+        return BaselineA2C(num_actions, 
             optimizer=tf.keras.optimizers.Adam(learning_rate=LR, clipnorm=CLIP_NO),
             model_name=agent), REINFORCE_WEIGHTS_PATH if agent == 'reinforce' else ACTOR_CRITIC_WEIGHTS_PATH
     if agent == 'dqn':
@@ -115,23 +115,24 @@ def play_game_TD(env, agent:Agent, save_weights:bool=True, save_path:str='',
         state = state_manager.get_current_state(initial_obs['rgb'])
         done = False
         # Iterate until the episode is over
-        with trange(math.ceil(MAX_TIMESTEPS_PER_EPISODE/SKIP_FRAMES)) as pbar:
+        with trange(MAX_TIMESTEPS_PER_EPISODE) as pbar:
             for episode_step in pbar:
+                # Compute epsilon in case the policy for training is epsilon-greedy. We use epsilon-decay to reduce random
+                # actions during time. Initially, epsilon is very high, but it quickly decreases.
+                # As decay, we multiply the initial epsilon by EPS_D at each timestep until it reaches the minimum
+                epsilon = max(EPS_S*EPS_D**(global_timestep), EPS_MIN)  
                 global_timestep += 1
-                # Compute epsilon in case the policy for training is epsilon-greedy
-                # Initially, epsilon is very high, but it decreases as episodes and episode steps within the episode go by.
-                epsilon = max(0.6 - 0.4*(episode/TRAINING_EPISODES) - 0.2*(episode_step/MAX_TIMESTEPS_PER_EPISODE), 0.01)
                 # Play one step of the game, obtaining the following state, the reward and 
                 # whether the episode is finished
                 next_state, reward, done = agent.play_one_step(env, state, 
                     epsilon, state_manager)
                 state = next_state
                 episode_rewards.append(reward)
-                # Check if the episode is over
+                # Try to do a training step
+                agent.training_step(episode)
+                # Check if the episode is over and end the episode
                 if done:
                     break
-                # If the episode is not over we can do a training step
-                agent.training_step(episode)
         # The episode is over: sum the obtained rewards
         episode_reward = sum(episode_rewards)
         game_rewards.append({global_timestep: episode_reward})
@@ -155,16 +156,30 @@ if __name__ == '__main__':
     os.makedirs(os.path.join('models', 'simpler', 'logs'), exist_ok=True)
     os.makedirs(os.path.join('models', 'dqn'), exist_ok=True)
     os.makedirs(os.path.join('models', 'reinforce'), exist_ok=True)
-    os.makedirs(os.path.join('models', 'actor_critic'), exist_ok=True)
+    os.makedirs(os.path.join('models', 'a2c'), exist_ok=True)
 
     # Check if a GPU is available for training
     device = check_gpu()
 
     # Initialize the environment
-    env = gym.make("VizdoomHealthGatheringSupreme-v0", frame_skip=4)
-    # There are 3 available actions (move forward, turn left, turn right)
-    num_actions = 3
-    # The observation space contains 240x320 RGB frames and the health of the player (that we don't use)
+    env = gym.make("VizdoomCorridor-v0")
+
+    # There are 7 available actions:
+    # MOVE_LEFT
+    # MOVE_RIGHT
+    # ATTACK
+    # MOVE_FORWARD
+    # MOVE_BACKWARD
+    # TURN_LEFT
+    # TURN_RIGHT
+    
+    # The observation space contains 240x320 RGB frames
+
+    # The rewards we get are:
+    # +dX for getting closer to the vest.
+    # -dX for getting further from the vest.
+    # -100 death penalty
+    num_actions = 7
 
     # Start playing
     with tf.device(device):
@@ -176,7 +191,7 @@ if __name__ == '__main__':
             load_weights(agent, save_path)
         # Play the game training the agents or evaluating the loaded weights.
         # If we are using actor critic or DQN as an agent, we need to update in a TD fashion.
-        if agent.model_name == 'dqn' or agent.model_name == 'actor_critic' or agent.model_name == 'random':
+        if agent.model_name == 'dqn' or agent.model_name == 'a2c' or agent.model_name == 'random':
             play_game_TD(env, agent, args.save_weights, save_path, args.start_episode)
         # Otherwise, we use a Monte-Carlo update style where we only update the network at the end
         #   of the episode

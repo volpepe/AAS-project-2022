@@ -1,6 +1,6 @@
 ### EPISODES INFO
 MAX_TIMESTEPS_PER_EPISODE = 2100
-TRAINING_EPISODES = 500
+TRAINING_EPISODES = 1000
 TESTING_EPISODES = 10
 
 ENV_NAME = "VizdoomHealthGatheringSupreme-v0"
@@ -22,12 +22,16 @@ LOGS_DIR = 'models/simpler/logs/'
 
 ### PARAMS
 CLIP_NO = 40.0       # Gradient norm clipping
-LR      = 1e-2       # Learning rate
+LR      = 1e-4       # Learning rate
 GAMMA   = 0.99       # Discount for rewards
 SIGMA   = 0.01       # Entropy coefficient
+EPS_D   = 0.999      # Epsilon decay for each time step
+EPS_S   = 0.99       # Starting epsilon value
+EPS_MIN = 0.01       # Minimum epsilon value
 ### DQN
 MAX_DQN_EXP_BUFFER_LEN = 5000   # Size of the experience buffer for DQN
 DQN_BATCH_SIZE = 32  # Batch size for DQN experience sampling
 DQN_START_UPDATES_EPISODE = 10   # In DQN updates start from episode 10.
 ### AC
 MAX_AC_EXP_BUFFER_LEN = MAX_TIMESTEPS_PER_EPISODE
+BATCH_SIZE_A2C = 32

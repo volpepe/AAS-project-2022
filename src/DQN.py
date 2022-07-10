@@ -11,9 +11,10 @@ from variables import DQN_BATCH_SIZE, DQN_START_UPDATES_EPISODE, GAMMA, \
 class DQN(Agent):
     """
     DQN based network, implemented using the specifications of the DQN paper
-    (Playing Atari with Deep Reinforcement Learning by Mnih et al., https://arxiv.org/pdf/1312.5602.pdf ).
+    (Playing Atari with Deep Reinforcement Learning by Mnih et al., https://arxiv.org/pdf/1312.5602.pdf ). The network
+    has been deepened a little because Doom is a little more complex than Atari games.
 
-    - Input: a batch of 42x42x4 tensors representing the previous 4 42x42 stacked black-and-white frames from the game
+    - Input: a batch of 84x84x4 tensors representing the previous 4 84x84 stacked black-and-white frames from the game
     - Output: the Q value for each state-action pair related to the input state
     """
     def __init__(self, num_actions:int, optimizer:tf.keras.optimizers.Optimizer,
@@ -27,16 +28,16 @@ class DQN(Agent):
         self.loss_function = tf.keras.losses.MeanSquaredError()
         self.optimizer = optimizer
         # Instantiate convolutional layers
-        self.conv1 = layers.Conv2D(filters=16, kernel_size=8, strides=(4,4), activation='relu')
-        self.conv2 = layers.Conv2D(filters=32, kernel_size=4, strides=(2,2), activation='relu')
+        self.conv1 = layers.Conv2D(filters=32, kernel_size=8, strides=(4,4), activation='relu')
+        self.conv2 = layers.Conv2D(filters=64, kernel_size=4, strides=(2,2), activation='relu')
+        self.conv3 = layers.Conv2D(filters=64, kernel_size=3, strides=(1,1), activation='relu')
         self.flatten = layers.Flatten()
-        self.dense = layers.Dense(256, activation="relu")
+        self.dense = layers.Dense(512, activation="relu")
         self.q_values = layers.Dense(self.num_actions)
 
     def call(self, inputs: tf.Tensor) -> tf.Tensor:
         # Input is a 1x42x42x4 sequence of images. We first apply some convolutions (1 is the batch size)
-        #  9x9x32 <-- 20x20x16 <-- 84x84x4
-        x = self.conv2(self.conv1(inputs))
+        x = self.conv3(self.conv2(self.conv1(inputs)))
         # Flatten the output
         x = self.flatten(x)
         # We pass the tensor through a dense layer
@@ -113,7 +114,7 @@ class DQN(Agent):
             # Collect the maximum Q values (keeping the batch dimension)
             next_Q_vals_max = np.max(next_Q_vals, axis=1)
             # Compute target: Rt if St+1 is terminal or Rt + discount * next_Q_val_max if it's not
-            targets = rewards + (GAMMA * next_Q_vals_max * ~dones)
+            targets = rewards + (GAMMA * next_Q_vals_max * (1-dones))
             # Create a one hot encoded mask to gather the Q value for the action the agent actually chose
             actions_mask = tf.one_hot(actions, depth=self.num_actions)
             # Open a GradientTape to record the following operations: we need to compute their gradients later

@@ -27,9 +27,9 @@ class StateManager():
     def preprocess_image(self, img) -> np.ndarray:
         '''
         Resizes the input image into the desired resolution and converts it in
-        black and white
+        black and white, then normalizes it in the range [0,1]
         '''
-        return np.array(Image.fromarray(img).resize(self.image_size).convert('L'))
+        return np.array(Image.fromarray(img).resize(self.image_size).convert('L')) / 255
 
     def get_current_state(self, new_image) -> State:
         '''
