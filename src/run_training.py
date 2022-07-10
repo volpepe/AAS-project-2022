@@ -118,10 +118,13 @@ def play_game_TD(env, agent:Agent, save_weights:bool=True, save_path:str='',
         with trange(math.ceil(MAX_TIMESTEPS_PER_EPISODE/SKIP_FRAMES)) as pbar:
             for episode_step in pbar:
                 global_timestep += 1
+                # Compute epsilon in case the policy for training is epsilon-greedy
+                # Initially, epsilon is very high, but it decreases as episodes and episode steps within the episode go by.
+                epsilon = max(0.6 - 0.4*(episode/TRAINING_EPISODES) - 0.2*(episode_step/MAX_TIMESTEPS_PER_EPISODE), 0.01)
                 # Play one step of the game, obtaining the following state, the reward and 
                 # whether the episode is finished
                 next_state, reward, done = agent.play_one_step(env, state, 
-                    episode_step, state_manager)
+                    epsilon, state_manager)
                 state = next_state
                 episode_rewards.append(reward)
                 # Check if the episode is over

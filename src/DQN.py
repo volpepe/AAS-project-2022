@@ -6,7 +6,7 @@ from state import State, StateManager
 from tensorflow.keras import layers
 from agent import Agent
 from variables import DQN_BATCH_SIZE, DQN_START_UPDATES_EPISODE, GAMMA, \
-    MAX_DQN_EXP_BUFFER_LEN, MAX_TIMESTEPS_PER_EPISODE
+    MAX_DQN_EXP_BUFFER_LEN, MAX_TIMESTEPS_PER_EPISODE, TRAINING_EPISODES
 
 class DQN(Agent):
     """
@@ -57,11 +57,8 @@ class DQN(Agent):
             # Act greedily with respect to them
             return np.argmax(Q_values[0])   # Remove batch dimension, get index with highest Q value
 
-    def play_one_step(self, env, state:State, episode_step:int, state_manager:StateManager) -> \
+    def play_one_step(self, env, state:State, epsilon:float, state_manager:StateManager) -> \
             Tuple[State, float, bool]:
-        # Compute epsilon in case the policy for training is epsilon-greedy
-        # Initially, epsilon is very high, but it decreases with time.
-        epsilon = max(1 - episode_step/MAX_TIMESTEPS_PER_EPISODE, 0.01)
         # Compute the action according to an epsilon greedy policy
         action = self.epsilon_greedy_policy(state, epsilon)
         # Execute the action, get the next observation and reward
