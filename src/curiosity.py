@@ -2,7 +2,7 @@ from typing import Any, Dict, Tuple
 import tensorflow as tf
 from tensorflow.keras import layers, losses, regularizers, Model
 from tensorflow.keras.layers import Layer
-from variables import BETA, ETA, CLIP_RE, ICM_LW
+from variables import BETA, ETA, ICM_LW
 
 class ICM(Model):
     '''
@@ -140,101 +140,3 @@ class InverseModel(Layer):
         # Dense layers for action prediction
         pred_at = self.dense2(self.dense1(e_states))      # [1, num_actions], probability distribution
         return pred_at
-
-############################################################
-
-# class RND(Model):
-#     '''
-#     Implementation of the RND (Random Network Distillation) as a intrinsic reward module.
-
-#     As the ICM, this module computes curiosity, an intrinsic reward for the agent that is
-#     added to the extrinsic reward it receives at each time step, but may not receive for a 
-#     long sequence of steps due to the sparsity of rewards.
-#     An agent that is curious is able to navigate the environment effectively even though 
-#     no explicit rewards are given to it.
-
-#     Differently from the ICM, where the state representations are learnt, we let a randomly
-#     initialized and untrained network produce the representations for the state. In this way
-#     the representation for state St will always be the same.
-
-#     This mechanism reduces the stochasticity of the curiosity module in a good way: indeed
-#     learning to represent a state from the state itself can lead to the noisy-TV effect, where
-#     an agent becomes overly curious over noise and becomes unable to represent the state 
-#     effectively.
-
-#     Instead, we let a predictor network try to predict the output of the random network. 
-#     This is a process called distillation: the predictor tries to distill the weights of the
-#     random network. In this way we have a mechanism to produce errors and thus rewards (the 
-#     difference between the two representations), and we make sure that the model is perfectly
-#     able to reproduce the representation by using the same network configuration for both
-#     networks.
-#     '''
-#     def __init__(self, optimizer) -> None:
-#         super(RND, self).__init__()
-#         self.target = Target()
-#         self.predictor = Predictor()
-#         self.optimizer = optimizer
-        
-#     def call(self, inputs) -> Tuple[tf.Tensor, tf.Tensor]:
-#         # Obtain the encoding by the target and the predictor
-#         pred_s = self.predictor(inputs)
-#         target_s  = self.target(inputs)
-#         # The loss of the model is compute as the MSE between these two
-#         loss = tf.reduce_sum(losses.mean_squared_error(target_s, pred_s))
-#         self.add_loss(loss)
-#         # Return the two encodings in order to compute the intrinsic reward
-#         return pred_s, target_s
-
-
-# class Predictor(Layer):
-#     '''
-#     This layer tries to predict the encoding of the state in input. The target is given by the target network, which
-#     is non trainable. Thus, this network will be trained by distillation to be similar to the target network.
-#     '''
-#     def __init__(self) -> None:
-#         super().__init__()
-#         self.conv1   = layers.Conv2D(filters=8,  kernel_size=4, strides=(4,4), padding='same', activation='relu', kernel_regularizer=regularizers.L2(0.01))    # Original has 32 filters and elu activation
-#         self.conv2   = layers.Conv2D(filters=16, kernel_size=4, strides=(2,2), padding='same', activation='relu', kernel_regularizer=regularizers.L2(0.01))
-#         self.conv3   = layers.Conv2D(filters=16, kernel_size=3, strides=(1,1), padding='same', activation='relu', kernel_regularizer=regularizers.L2(0.01))
-#         self.dropout = layers.Dropout(0.2)
-#         self.dense1  = layers.Dense(64)
-#         self.dense2  = layers.Dense(256)
-#         self.flatten = layers.Flatten()
-    
-#     def call(self, inputs) -> Tuple[tf.Tensor, tf.Tensor]:
-#         # Input is st+1
-#         # Compute encoding of state
-#         x = self.conv1(inputs)
-#         x = self.conv2(x)
-#         x = self.conv3(x)
-#         x = self.flatten(x)
-#         x = self.dropout(x)
-#         x = self.dense1(x)
-#         x = self.dropout(x)
-#         x = self.dense2(x)
-#         return x
-
-
-# class Target(Layer):
-#     '''
-#     NOTE: This layer is NON-TRAINABLE. It produces the encoding of the states and acts as the target for 
-#     the distillation
-#     '''
-#     def __init__(self) -> None:
-#         super().__init__(trainable=False)
-#         self.trainable = False
-#         self.conv1   = layers.Conv2D(filters=8,  kernel_size=4, strides=(4,4), padding='same', activation='relu')    # Original has 32 filters and elu activation
-#         self.conv2   = layers.Conv2D(filters=16, kernel_size=4, strides=(2,2), padding='same', activation='relu')
-#         self.conv3   = layers.Conv2D(filters=16, kernel_size=3, strides=(1,1), padding='same', activation='relu')
-#         self.dense   = layers.Dense(256)
-#         self.flatten = layers.Flatten()
-    
-#     def call(self, inputs) -> Tuple[tf.Tensor, tf.Tensor]:
-#         # Input is st+1
-#         # Compute encoding of state
-#         x = self.conv1(inputs)
-#         x = self.conv2(x)
-#         x = self.conv3(x)
-#         x = self.flatten(x)
-#         x = self.dense(x)
-#         return x
