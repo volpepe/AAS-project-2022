@@ -1,6 +1,4 @@
 # Vizdoom + Gym
-import imp
-from tabnanny import check
 import gym
 from vizdoom import gym_wrapper
 # Common imports
@@ -17,7 +15,7 @@ from tqdm import trange
 from agent import Agent
 from DQN import DQN
 from actor_critic import BaselineActorCritic
-from state import StateManager
+from state import State, StateManager
 # Variables
 from variables import *
 
@@ -36,19 +34,23 @@ def parse_args():
     return args.parse_args()
 
 #############           UTILITIES            ###############
-def select_agent(args, actions:List) -> Tuple[Agent, str]:
+def select_agent(args, num_actions:int) -> Tuple[Agent, str]:
     '''
     Returns the chosen agent and its save weight path
     '''
-    agent = args.agent
+    agent = args.algorithm
     if agent == 'random':
-        return Agent(len(actions)), ''
+        return Agent(num_actions, 
+            optimizer=tf.keras.optimizers.Adam(learning_rate=LR, clipnorm=CLIP_NO)), ''
     if agent == 'reinforce' or agent == 'actor_critic':
         # The two algorithms share some similarities, so they are implemented with the same agent
-        return BaselineActorCritic(len(actions), name=agent), \
-            REINFORCE_WEIGHTS_PATH if agent == 'reinforce' else ACTOR_CRITIC_WEIGHTS_PATH
+        return BaselineActorCritic(num_actions, 
+            optimizer=tf.keras.optimizers.Adam(learning_rate=LR, clipnorm=CLIP_NO),
+            name=agent), REINFORCE_WEIGHTS_PATH if agent == 'reinforce' else ACTOR_CRITIC_WEIGHTS_PATH
     if agent == 'dqn':
-        return DQN(len(actions)), DQN_WEIGHTS_PATH
+        return DQN(num_actions, 
+            optimizer=tf.keras.optimizers.Adam(learning_rate=LR, clipnorm=CLIP_NO)), \
+        DQN_WEIGHTS_PATH
     # If we arrive here we have chosen something not implemented
     raise NotImplementedError
 
@@ -64,14 +66,17 @@ def make_actions(num_available_actions:int) -> List:
     return actions
 
 def save_weights_and_logs(agent:Agent, extrinsic_rewards:Sequence, save_path: str):
-    agent.save_weights(save_path)
-    print(f"Agent weights saved successfully at {save_path}")
-    np.save(os.path.join(LOGS_DIR, agent.name), np.array(extrinsic_rewards), allow_pickle=True)
-    print(f"Rewards history saved successfully at {os.path.join(LOGS_DIR, agent.name)}")
+    if save_path:
+        agent.save_weights(save_path)
+        print(f"Agent weights saved successfully at {save_path}")
+    else:
+        print(f'Tried to save model weights, but model needs no saving.')
+    np.save(os.path.join(LOGS_DIR, agent.model_name), np.array(extrinsic_rewards), allow_pickle=True)
+    print(f"Rewards history saved successfully at {os.path.join(LOGS_DIR, agent.model_name)}")
 
 def load_weights(agent:Agent, save_path:str):
     # Select actor weights based on the type of the actor
-    if agent.name != 'random':
+    if agent.model_name != 'random':
         try:
             agent.load_weights(save_path)
             print("Loaded weights agent")
@@ -91,14 +96,13 @@ def check_gpu() -> str:
     return device
 
 #################### PLAYING #####################
-
 ### MAKE IT SEPARATE FOR MONTE CARLO (REINFORCE) VS ACTOR CRITIC AND DQN (TD)
-def play_game(env, agent:Agent, actions:List, save_weights:bool=True, save_path:str='', 
+def play_game_TD(env, agent:Agent, save_weights:bool=True, save_path:str='', 
             start_episode:int=0):
-    # Initialize the optimizer
-    optimizer = tf.keras.optimizers.Adam(learning_rate=LR, clipnorm=CLIP_NO)
     # Keep a list of obtained rewards
-    episode_rewards = []
+    game_rewards = []
+    # Keep track of the global timestep
+    global_timestep = 0
     # Iterate over episodes
     for episode in range(TRAINING_EPISODES):
         # Initialise a list for the episode rewards
@@ -111,22 +115,33 @@ def play_game(env, agent:Agent, actions:List, save_weights:bool=True, save_path:
         state = state_manager.get_current_state(initial_obs['rgb'])
         done = False
         # Iterate until the episode is over
-        with trange(MAX_TIMESTEPS_PER_EPISODE) as pbar:
+        with trange(math.ceil(MAX_TIMESTEPS_PER_EPISODE/SKIP_FRAMES)) as pbar:
             for episode_step in pbar:
-                # Update the progress bar
-                pbar.update(1)
+                global_timestep += 1
                 # Play one step of the game, obtaining the following state, the reward and 
                 # whether the episode is finished
-                epsilon = max(1- ep_num/500, 0.01)
-                state, reward, done, info = play_one_step(env, initial_state, epsilon, state_manager)
-                rewards.append(reward)
+                next_state, reward, done = agent.play_one_step(env, state, 
+                    episode_step, state_manager)
+                state = next_state
+                episode_rewards.append(reward)
+                # Check if the episode is over
                 if done:
                     break
-                elif ep_num > 1:
-                    training_step(batch_size)
-        episode_reward = sum(ep_rewards)
-        print(f"Episode reward: {episode_reward}")
+                # If the episode is not over we can do a training step
+                agent.training_step(episode)
+        # The episode is over: sum the obtained rewards
+        episode_reward = sum(episode_rewards)
+        game_rewards.append({global_timestep: episode_reward})
+        print(f"Episode: {episode}, Total reward: {episode_reward}")
+        recent_mean_reward = np.mean([list(g.values())[0] for g in game_rewards[-10:]])
+        print(f"Mean reward in last 10 episodes: {recent_mean_reward:.2f}")
+        # Check if it's time to save the weights
+        if save_weights and ((episode % WEIGHTS_SAVE_FREQUENCY) == 0 or episode == (TRAINING_EPISODES-1)):
+            save_weights_and_logs(agent, game_rewards, save_path)
 
+def play_game_monte_carlo(env, agent:Agent, actions:List, save_weights:bool=True, save_path:str='', 
+            start_episode:int=0):
+    pass
 
 ##################### START #####################
 if __name__ == '__main__':
@@ -146,20 +161,24 @@ if __name__ == '__main__':
     env = gym.make("VizdoomHealthGatheringSupreme-v0", frame_skip=4)
     # There are 3 available actions (move forward, turn left, turn right)
     num_actions = 3
-    # The observation space contains 240x320 RGB frames and the health of the player (that we don't need)
-    # Create the actions as one-hot encoded lists of pressed buttons:
-    actions = make_actions(num_actions)
+    # The observation space contains 240x320 RGB frames and the health of the player (that we don't use)
 
     # Start playing
     with tf.device(device):
         # Everything is executed in the context of the device (on GPU if available or on CPU).
         # Initialize the agent.
-        agent, save_path = select_agent(args, actions)
+        agent, save_path = select_agent(args, num_actions)
         # Check if we need to load the weights for the agent and for the ICM
         if args.load_weights:
             load_weights(agent, save_path)
         # Play the game training the agents or evaluating the loaded weights.
-        play_game(env, agent, actions, args.save_weights, save_path, args.start_episode)
+        # If we are using actor critic or DQN as an agent, we need to update in a TD fashion.
+        if agent.model_name == 'dqn' or agent.model_name == 'actor critic' or agent.model_name == 'random':
+            play_game_TD(env, agent, args.save_weights, save_path, args.start_episode)
+        # Otherwise, we use a Monte-Carlo update style where we only update the network at the end
+        #   of the episode
+        else:
+            play_game_monte_carlo(env, agent, args.save_weights, save_path, args.start_episode)
 
     # At the end, close the environment
     env.close()
