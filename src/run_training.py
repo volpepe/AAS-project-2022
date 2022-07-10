@@ -46,7 +46,7 @@ def select_agent(args, num_actions:int) -> Tuple[Agent, str]:
         # The two algorithms share some similarities, so they are implemented with the same agent
         return BaselineActorCritic(num_actions, 
             optimizer=tf.keras.optimizers.Adam(learning_rate=LR, clipnorm=CLIP_NO),
-            name=agent), REINFORCE_WEIGHTS_PATH if agent == 'reinforce' else ACTOR_CRITIC_WEIGHTS_PATH
+            model_name=agent), REINFORCE_WEIGHTS_PATH if agent == 'reinforce' else ACTOR_CRITIC_WEIGHTS_PATH
     if agent == 'dqn':
         return DQN(num_actions, 
             optimizer=tf.keras.optimizers.Adam(learning_rate=LR, clipnorm=CLIP_NO)), \
@@ -176,7 +176,7 @@ if __name__ == '__main__':
             load_weights(agent, save_path)
         # Play the game training the agents or evaluating the loaded weights.
         # If we are using actor critic or DQN as an agent, we need to update in a TD fashion.
-        if agent.model_name == 'dqn' or agent.model_name == 'actor critic' or agent.model_name == 'random':
+        if agent.model_name == 'dqn' or agent.model_name == 'actor_critic' or agent.model_name == 'random':
             play_game_TD(env, agent, args.save_weights, save_path, args.start_episode)
         # Otherwise, we use a Monte-Carlo update style where we only update the network at the end
         #   of the episode
