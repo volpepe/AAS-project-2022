@@ -35,6 +35,6 @@ class Agent(keras.Model):
         next_state = state_manager.get_current_state(next_obs['rgb'])
         return next_state, reward, done
 
-    def training_step(self, episode:int):
+    def training_step(self, episode:int, episode_step:int, global_step:int):
         # This network does not learn!!
         pass

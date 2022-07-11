@@ -3,10 +3,7 @@ import gym
 from vizdoom import gym_wrapper
 # Common imports
 import os
-from typing import Dict, List, Sequence, Tuple, Union
-from collections import deque
-import time
-import math
+from typing import List, Sequence, Tuple
 import argparse
 import numpy as np
 import tensorflow as tf
@@ -15,7 +12,7 @@ from tqdm import trange
 from agent import Agent
 from DQN import DQN
 from actor_critic import BaselineA2C
-from state import State, StateManager
+from state import StateManager
 # Variables
 from variables import *
 
@@ -104,7 +101,7 @@ def play_game_TD(env, agent:Agent, save_weights:bool=True, save_path:str='',
     # Keep track of the global timestep
     global_timestep = 0
     # Iterate over episodes
-    for episode in range(TRAINING_EPISODES):
+    for episode in range(start_episode, TRAINING_EPISODES):
         # Initialise a list for the episode rewards
         episode_rewards = []
         # Instantiate the state manager for the episode
@@ -117,6 +114,7 @@ def play_game_TD(env, agent:Agent, save_weights:bool=True, save_path:str='',
         # Iterate until the episode is over
         with trange(MAX_TIMESTEPS_PER_EPISODE) as pbar:
             for episode_step in pbar:
+                pbar.set_description(f'Global timestep: {global_timestep}')
                 # Compute epsilon in case the policy for training is epsilon-greedy. We use epsilon-decay to reduce random
                 # actions during time. Initially, epsilon is very high, but it quickly decreases.
                 # As decay, we multiply the initial epsilon by EPS_D at each timestep until it reaches the minimum
@@ -129,7 +127,7 @@ def play_game_TD(env, agent:Agent, save_weights:bool=True, save_path:str='',
                 state = next_state
                 episode_rewards.append(reward)
                 # Try to do a training step
-                agent.training_step(episode)
+                agent.training_step(episode, episode_step, global_timestep)
                 # Check if the episode is over and end the episode
                 if done:
                     break

@@ -5,8 +5,8 @@ import tensorflow as tf
 from state import State, StateManager
 from tensorflow.keras import layers
 from agent import Agent
-from variables import DQN_BATCH_SIZE, DQN_START_UPDATES_EPISODE, GAMMA, \
-    MAX_DQN_EXP_BUFFER_LEN, MAX_TIMESTEPS_PER_EPISODE, TRAINING_EPISODES
+from variables import DQN_BATCH_SIZE, DQN_START_UPDATES_EPISODE, \
+    DQN_TRAIN_EVERY, GAMMA, MAX_DQN_EXP_BUFFER_LEN
 
 class DQN(Agent):
     """
@@ -85,7 +85,7 @@ class DQN(Agent):
         )
         return states, actions, rewards, next_states, dones
 
-    def training_step(self, episode:int):
+    def training_step(self, episode:int, episode_step:int, global_step:int):
         '''
         Update the weights of the network. 
         Given a full transition St -> At -> Rt -> St+1, the loss function
@@ -105,29 +105,31 @@ class DQN(Agent):
         '''
         # We only start updating after some episodes to fill the buffer a little first
         if episode >= DQN_START_UPDATES_EPISODE:
-            # Sample a batch of experience from the experience buffer
-            states, actions, rewards, next_states, dones = self.sample_experiences()
-            # Predict the following Q values
-            next_Q_vals = self.predict(tf.stack(
-                [tf.cast(st_1.repr, tf.float32) for st_1 in next_states]), 
-                batch_size=DQN_BATCH_SIZE, verbose=0)
-            # Collect the maximum Q values (keeping the batch dimension)
-            next_Q_vals_max = np.max(next_Q_vals, axis=1)
-            # Compute target: Rt if St+1 is terminal or Rt + discount * next_Q_val_max if it's not
-            targets = rewards + (GAMMA * next_Q_vals_max * (1-dones))
-            # Create a one hot encoded mask to gather the Q value for the action the agent actually chose
-            actions_mask = tf.one_hot(actions, depth=self.num_actions)
-            # Open a GradientTape to record the following operations: we need to compute their gradients later
-            with tf.GradientTape() as tape:
-                # Compute the Q values using the model
-                Q_vals = self(tf.cast(
-                    tf.stack([state.repr for state in states]),
-                    dtype=tf.float32))                                              # batch_sizex3
-                # Get the specific Q value for the actions the agent has made
-                Q_vals = tf.reduce_sum(Q_vals*actions_mask, axis=1, keepdims=True)  # batch_sizex1
-                # Compute the loss between the targets (of which we do not compute gradients) and
-                # the Q values obtained by the model for state St
-                loss = tf.reduce_mean(self.loss_function(targets, Q_vals))
-            # Compute gradients and apply them on the trainable variables.
-            gradients = tape.gradient(loss, self.trainable_variables)
-            self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
+            # Also, we update once every DQN_TRAIN_EVERY
+            if (global_step % DQN_TRAIN_EVERY) == 0:
+                # Sample a batch of experience from the experience buffer
+                states, actions, rewards, next_states, dones = self.sample_experiences()
+                # Predict the following Q values
+                next_Q_vals = self.predict(tf.stack(
+                    [tf.cast(st_1.repr, tf.float32) for st_1 in next_states]), 
+                    batch_size=DQN_BATCH_SIZE, verbose=0)
+                # Collect the maximum Q values (keeping the batch dimension)
+                next_Q_vals_max = np.max(next_Q_vals, axis=1)
+                # Compute target: Rt if St+1 is terminal or Rt + discount * next_Q_val_max if it's not
+                targets = rewards + (GAMMA * next_Q_vals_max * (1-dones))
+                # Create a one hot encoded mask to gather the Q value for the action the agent actually chose
+                actions_mask = tf.one_hot(actions, depth=self.num_actions)
+                # Open a GradientTape to record the following operations: we need to compute their gradients later
+                with tf.GradientTape() as tape:
+                    # Compute the Q values using the model
+                    Q_vals = self(tf.cast(
+                        tf.stack([state.repr for state in states]),
+                        dtype=tf.float32))                                              # batch_sizex3
+                    # Get the specific Q value for the actions the agent has made
+                    Q_vals = tf.reduce_sum(Q_vals*actions_mask, axis=1, keepdims=True)  # batch_sizex1
+                    # Compute the loss between the targets (of which we do not compute gradients) and
+                    # the Q values obtained by the model for state St
+                    loss = tf.reduce_mean(self.loss_function(targets, Q_vals))
+                # Compute gradients and apply them on the trainable variables.
+                gradients = tape.gradient(loss, self.trainable_variables)
+                self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
