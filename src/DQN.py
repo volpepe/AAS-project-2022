@@ -3,37 +3,29 @@ from typing import Tuple
 import numpy as np
 import tensorflow as tf
 from state import State, StateManager
-from tensorflow.keras import layers
+from tensorflow.keras import layers, Model, backend
 from agent import Agent
-from variables import DQN_BATCH_SIZE, DQN_START_UPDATES_EPISODE, \
-    DQN_TRAIN_EVERY, GAMMA, MAX_DQN_EXP_BUFFER_LEN
+from variables import DQN_BATCH_SIZE, DQN_C, DQN_START_UPDATES_EPISODE, \
+    DQN_TRAIN_EVERY, GAMMA, INPUT_SHAPE, MAX_DQN_EXP_BUFFER_LEN
 
-class DQN(Agent):
+class DQNModel(Model):
     """
     DQN based network, implemented using the specifications of the DQN paper
-    (Playing Atari with Deep Reinforcement Learning by Mnih et al., https://arxiv.org/pdf/1312.5602.pdf ). The network
-    has been deepened a little because Doom is a little more complex than Atari games.
+    (Human-level control through deep reinforcement learning by Mnih et al., https://www.nature.com/articles/nature14236.pdf ). 
 
     - Input: a batch of 84x84x4 tensors representing the previous 4 84x84 stacked black-and-white frames from the game
     - Output: the Q value for each state-action pair related to the input state
     """
-    def __init__(self, num_actions:int, optimizer:tf.keras.optimizers.Optimizer,
-            model_name:str='dqn') -> None:
-        super().__init__(num_actions, optimizer)
+    def __init__(self, num_actions) -> None:
+        super(DQNModel, self).__init__()
         self.num_actions = num_actions
-        self.model_name = model_name
-        # The DQN model has a replay buffer that uses to collect experience for training
-        self.replay_buffer = deque(maxlen=MAX_DQN_EXP_BUFFER_LEN)
-        # Store the loss function and the optimizer for the model
-        self.loss_function = tf.keras.losses.MeanSquaredError()
-        self.optimizer = optimizer
         # Instantiate convolutional layers
-        self.conv1 = layers.Conv2D(filters=32, kernel_size=8, strides=(4,4), activation='relu')
+        self.conv1 = layers.Conv2D(filters=32, kernel_size=8, strides=(4,4), activation='relu', input_shape=INPUT_SHAPE)
         self.conv2 = layers.Conv2D(filters=64, kernel_size=4, strides=(2,2), activation='relu')
         self.conv3 = layers.Conv2D(filters=64, kernel_size=3, strides=(1,1), activation='relu')
         self.flatten = layers.Flatten()
         self.dense = layers.Dense(512, activation="relu")
-        self.q_values = layers.Dense(self.num_actions)
+        self.q_values = layers.Dense(num_actions)
 
     def call(self, inputs: tf.Tensor) -> tf.Tensor:
         # Input is a 1x42x42x4 sequence of images. We first apply some convolutions (1 is the batch size)
@@ -46,6 +38,34 @@ class DQN(Agent):
         q_vals = self.q_values(x)
         return q_vals
 
+def ClippedMSE(y_true, y_pred):
+    '''
+    Taken directly from Keras, but modified to add the clipping of the difference.
+    '''
+    y_pred = tf.convert_to_tensor(y_pred)
+    y_true = tf.cast(y_true, y_pred.dtype)
+    return backend.mean(tf.math.square(tf.clip_by_value(y_pred - y_true, -1., 1.)), axis=-1)
+
+class DQNAgent(Agent):
+
+    def __init__(self, num_actions:int, optimizer:tf.keras.optimizers.Optimizer,
+            model_name:str='dqn') -> None:
+        super().__init__(num_actions, optimizer)
+        self.num_actions = num_actions
+        self.model_name = model_name
+        # The DQN model has a replay buffer that uses to collect experience for training
+        self.replay_buffer = deque(maxlen=MAX_DQN_EXP_BUFFER_LEN)
+        # Store the loss function and the optimizer for the model
+        self.loss_function = ClippedMSE
+        self.optimizer = optimizer
+        # We instantiate the target network and the actual Q-value network
+        self.target_Q_model = DQNModel(num_actions)
+        self.model = DQNModel(num_actions)
+        
+    def update_target_network(self):
+        # Copy the same weights
+        self.target_Q_model.set_weights(self.model.get_weights())
+
     def epsilon_greedy_policy(self, state:State, epsilon:float) -> int:
         '''
         Return a random action, or the action obtained by a greedy policy on the Q values.
@@ -54,7 +74,7 @@ class DQN(Agent):
             return np.random.randint(self.num_actions)
         else:
             # Obtain the Q values for each action given the current state
-            Q_values = self(tf.cast(tf.expand_dims(state.repr, axis=0), dtype=tf.float32))
+            Q_values = self.model(tf.cast(tf.expand_dims(state.repr, axis=0), dtype=tf.float32))
             # Act greedily with respect to them
             return np.argmax(Q_values[0])   # Remove batch dimension, get index with highest Q value
 
@@ -66,8 +86,9 @@ class DQN(Agent):
         next_obs, reward, done, _ = env.step(action)
         # Transform the observation into the next state
         next_state = state_manager.get_current_state(next_obs['rgb'])
-        # Add all the information into the replay buffer in order to train on it later
-        self.replay_buffer.append((state, action, reward, next_state, done))
+        # Add all the information into the replay buffer in order to train on it later.
+        # Note that saved rewards are clipped in the range -1, 1
+        self.replay_buffer.append((state, action, np.clip(reward, -1., 1.), next_state, done))
         return next_state, reward, done
 
     def sample_experiences(self) -> \
@@ -109,8 +130,8 @@ class DQN(Agent):
             if (global_step % DQN_TRAIN_EVERY) == 0:
                 # Sample a batch of experience from the experience buffer
                 states, actions, rewards, next_states, dones = self.sample_experiences()
-                # Predict the following Q values
-                next_Q_vals = self.predict(tf.stack(
+                # Predict the following Q values using the target network
+                next_Q_vals = self.target_Q_model.predict(tf.stack(
                     [tf.cast(st_1.repr, tf.float32) for st_1 in next_states]), 
                     batch_size=DQN_BATCH_SIZE, verbose=0)
                 # Collect the maximum Q values (keeping the batch dimension)
@@ -122,7 +143,7 @@ class DQN(Agent):
                 # Open a GradientTape to record the following operations: we need to compute their gradients later
                 with tf.GradientTape() as tape:
                     # Compute the Q values using the model
-                    Q_vals = self(tf.cast(
+                    Q_vals = self.model(tf.cast(
                         tf.stack([state.repr for state in states]),
                         dtype=tf.float32))                                              # batch_sizex3
                     # Get the specific Q value for the actions the agent has made
@@ -130,6 +151,11 @@ class DQN(Agent):
                     # Compute the loss between the targets (of which we do not compute gradients) and
                     # the Q values obtained by the model for state St
                     loss = tf.reduce_mean(self.loss_function(targets, Q_vals))
-                # Compute gradients and apply them on the trainable variables.
-                gradients = tape.gradient(loss, self.trainable_variables)
-                self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
+                # Compute gradients and apply them on the trainable variables. Gradient is computed only with respect
+                # to the non-target network.
+                gradients = tape.gradient(loss, self.model.trainable_variables)
+                self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
+            # If C steps have been made, update the target network.
+            if (global_step % DQN_C) == 0:
+                self.update_target_network()
+

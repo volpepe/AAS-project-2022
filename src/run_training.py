@@ -2,6 +2,7 @@
 import gym
 from vizdoom import gym_wrapper
 # Common imports
+import math
 import os
 from typing import List, Sequence, Tuple
 import argparse
@@ -10,7 +11,7 @@ import tensorflow as tf
 from tqdm import trange
 # Our modules
 from agent import Agent
-from DQN import DQN
+from DQN import DQNAgent
 from actor_critic import BaselineA2C
 from state import StateManager
 # Variables
@@ -39,32 +40,21 @@ def select_agent(args, num_actions:int) -> Tuple[Agent, str]:
     if agent == 'random':
         return Agent(num_actions, 
             optimizer=tf.keras.optimizers.Adam(learning_rate=LR, clipnorm=CLIP_NO)), ''
-    if agent == 'reinforce' or agent == 'a2c':
+    if agent == 'a2c':
         # The two algorithms share some similarities, so they are implemented with the same agent
         return BaselineA2C(num_actions, 
             optimizer=tf.keras.optimizers.Adam(learning_rate=LR, clipnorm=CLIP_NO),
-            model_name=agent), REINFORCE_WEIGHTS_PATH if agent == 'reinforce' else ACTOR_CRITIC_WEIGHTS_PATH
+            model_name=agent), ACTOR_CRITIC_WEIGHTS_PATH
     if agent == 'dqn':
-        return DQN(num_actions, 
+        return DQNAgent(num_actions, 
             optimizer=tf.keras.optimizers.Adam(learning_rate=LR, clipnorm=CLIP_NO)), \
         DQN_WEIGHTS_PATH
     # If we arrive here we have chosen something not implemented
     raise NotImplementedError
 
-def make_actions(num_available_actions:int) -> List:
-    '''
-    Obtain the list of available actions as one-hot-encoded buttons
-    '''
-    actions = []
-    for i in range(num_available_actions):
-        ll = [False]*num_available_actions
-        ll[i] = True
-        actions.append(ll)
-    return actions
-
 def save_weights_and_logs(agent:Agent, extrinsic_rewards:Sequence, save_path: str):
     if save_path:
-        agent.save_weights(save_path)
+        agent.model.save_weights(save_path)
         print(f"Agent weights saved successfully at {save_path}")
     else:
         print(f'Tried to save model weights, but model needs no saving.')
@@ -75,8 +65,8 @@ def load_weights(agent:Agent, save_path:str):
     # Select actor weights based on the type of the actor
     if agent.model_name != 'random':
         try:
-            agent.load_weights(save_path)
-            print("Loaded weights agent")
+            agent.model.load_weights(save_path)
+            print("Loaded weights of agent")
         except:
             print(f"Could not find weights for the agent at {save_path}")
     else:
@@ -112,7 +102,7 @@ def play_game_TD(env, agent:Agent, save_weights:bool=True, save_path:str='',
         state = state_manager.get_current_state(initial_obs['rgb'])
         done = False
         # Iterate until the episode is over
-        with trange(MAX_TIMESTEPS_PER_EPISODE) as pbar:
+        with trange(math.ceil(MAX_TIMESTEPS_PER_EPISODE/SKIP_FRAMES)) as pbar:
             for episode_step in pbar:
                 pbar.set_description(f'Global timestep: {global_timestep}')
                 # Compute epsilon in case the policy for training is epsilon-greedy. We use epsilon-decay to reduce random
@@ -141,10 +131,6 @@ def play_game_TD(env, agent:Agent, save_weights:bool=True, save_path:str='',
         if save_weights and ((episode % WEIGHTS_SAVE_FREQUENCY) == 0 or episode == (TRAINING_EPISODES-1)):
             save_weights_and_logs(agent, game_rewards, save_path)
 
-def play_game_monte_carlo(env, agent:Agent, actions:List, save_weights:bool=True, save_path:str='', 
-            start_episode:int=0):
-    pass
-
 ##################### START #####################
 if __name__ == '__main__':
     # Collect args
@@ -152,15 +138,14 @@ if __name__ == '__main__':
 
     # Create folders for models and logs
     os.makedirs(os.path.join('models', 'simpler', 'logs'), exist_ok=True)
-    os.makedirs(os.path.join('models', 'dqn'), exist_ok=True)
-    os.makedirs(os.path.join('models', 'reinforce'), exist_ok=True)
-    os.makedirs(os.path.join('models', 'a2c'), exist_ok=True)
+    os.makedirs(os.path.join('models', 'simpler', 'dqn'), exist_ok=True)
+    os.makedirs(os.path.join('models', 'simpler', 'a2c'), exist_ok=True)
 
     # Check if a GPU is available for training
     device = check_gpu()
 
     # Initialize the environment
-    env = gym.make("VizdoomCorridor-v0")
+    env = gym.make("VizdoomCorridor-v0", frame_skip=SKIP_FRAMES)
 
     # There are 7 available actions:
     # MOVE_LEFT
@@ -184,9 +169,17 @@ if __name__ == '__main__':
         # Everything is executed in the context of the device (on GPU if available or on CPU).
         # Initialize the agent.
         agent, save_path = select_agent(args, num_actions)
+        # Run random input in the network to create initial weights
+        agent.model(np.stack([np.random.random(INPUT_SHAPE)]))
+        if agent.model_name == 'dqn':
+            # Also call the target network
+            agent.target_Q_model(np.stack([np.random.random(INPUT_SHAPE)]))
         # Check if we need to load the weights for the agent and for the ICM
         if args.load_weights:
             load_weights(agent, save_path)
+        # For DQN, copy the weights of the model in the target network.
+        if agent.model_name == 'dqn':
+            agent.update_target_network()
         # Play the game training the agents or evaluating the loaded weights.
         # If we are using actor critic or DQN as an agent, we need to update in a TD fashion.
         if agent.model_name == 'dqn' or agent.model_name == 'a2c' or agent.model_name == 'random':
@@ -194,7 +187,7 @@ if __name__ == '__main__':
         # Otherwise, we use a Monte-Carlo update style where we only update the network at the end
         #   of the episode
         else:
-            play_game_monte_carlo(env, agent, args.save_weights, save_path, args.start_episode)
+            raise NotImplementedError
 
     # At the end, close the environment
     env.close()
