@@ -3,6 +3,7 @@ import numpy as np
 import gym
 from vizdoom import gym_wrapper
 # Common imports
+from time import sleep
 from typing import Tuple
 import argparse
 import tensorflow as tf
@@ -91,6 +92,7 @@ def play_game(env, agent:Agent):
                 # Check if the episode is over and end the episode
                 if done:
                     break
+                sleep(1/30) # 30 FPS
         # The episode is over: sum the obtained rewards
         episode_reward = sum(episode_rewards)
         print(f"Episode: {episode}, Total reward: {episode_reward}")
