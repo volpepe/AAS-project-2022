@@ -10,7 +10,7 @@ import tensorflow as tf
 from tqdm import trange
 # Our modules
 from agent import Agent
-from DQN import DQN
+from DQN import DQNAgent
 from actor_critic import BaselineA2C
 from state import StateManager
 # Variables
@@ -33,15 +33,15 @@ def select_agent(args, num_actions:int) -> Tuple[Agent, str]:
     agent = args.algorithm
     if agent == 'random':
         return Agent(num_actions, 
-            optimizer=tf.keras.optimizers.Adam(learning_rate=LR, clipnorm=CLIP_NO)), ''
+            optimizer=tf.keras.optimizers.Adam(learning_rate=LR_DQN, clipnorm=CLIP_NO)), ''
     elif agent == 'reinforce' or agent == 'a2c':
         # The two algorithms share some similarities, so they are implemented with the same agent
         return BaselineA2C(num_actions, 
-            optimizer=tf.keras.optimizers.Adam(learning_rate=LR, clipnorm=CLIP_NO),
+            optimizer=tf.keras.optimizers.Adam(learning_rate=LR_A2C, clipnorm=CLIP_NO),
             model_name=agent), ACTOR_CRITIC_WEIGHTS_PATH
     elif agent == 'dqn':
-        return DQN(num_actions, 
-            optimizer=tf.keras.optimizers.Adam(learning_rate=LR, clipnorm=CLIP_NO)), \
+        return DQNAgent(num_actions, 
+            optimizer=tf.keras.optimizers.Adam(learning_rate=LR_DQN, clipnorm=CLIP_NO)), \
         DQN_WEIGHTS_PATH
     # If we arrive here we have chosen something not implemented
     raise NotImplementedError

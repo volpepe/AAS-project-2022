@@ -20,7 +20,7 @@ class DQNModel(Model):
         super(DQNModel, self).__init__()
         self.num_actions = num_actions
         # Instantiate convolutional layers
-        self.conv1 = layers.Conv2D(filters=32, kernel_size=8, strides=(4,4), activation='relu', input_shape=INPUT_SHAPE)
+        self.conv1 = layers.Conv2D(filters=32, kernel_size=8, strides=(4,4), activation='relu')
         self.conv2 = layers.Conv2D(filters=64, kernel_size=4, strides=(2,2), activation='relu')
         self.conv3 = layers.Conv2D(filters=64, kernel_size=3, strides=(1,1), activation='relu')
         self.flatten = layers.Flatten()

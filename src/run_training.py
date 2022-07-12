@@ -39,15 +39,16 @@ def select_agent(args, num_actions:int) -> Tuple[Agent, str]:
     agent = args.algorithm
     if agent == 'random':
         return Agent(num_actions, 
-            optimizer=tf.keras.optimizers.Adam(learning_rate=LR, clipnorm=CLIP_NO)), ''
+            optimizer=tf.keras.optimizers.Adam(learning_rate=LR_DQN, clipnorm=CLIP_NO)), ''
     if agent == 'a2c':
         # The two algorithms share some similarities, so they are implemented with the same agent
         return BaselineA2C(num_actions, 
-            optimizer=tf.keras.optimizers.Adam(learning_rate=LR, clipnorm=CLIP_NO),
+            # This method has 2 optimizers, one for the actor and one for the critic
+            optimizer=tf.keras.optimizers.Adam(learning_rate=LR_A2C, clipnorm=CLIP_NO),
             model_name=agent), ACTOR_CRITIC_WEIGHTS_PATH
     if agent == 'dqn':
         return DQNAgent(num_actions, 
-            optimizer=tf.keras.optimizers.Adam(learning_rate=LR, clipnorm=CLIP_NO)), \
+            optimizer=tf.keras.optimizers.Adam(learning_rate=LR_DQN, clipnorm=CLIP_NO)), \
         DQN_WEIGHTS_PATH
     # If we arrive here we have chosen something not implemented
     raise NotImplementedError
@@ -108,7 +109,7 @@ def play_game_TD(env, agent:Agent, save_weights:bool=True, save_path:str='',
                 # Compute epsilon in case the policy for training is epsilon-greedy. We use epsilon-decay to reduce random
                 # actions during time. Initially, epsilon is very high, but it quickly decreases.
                 # As decay, we multiply the initial epsilon by EPS_D at each timestep until it reaches the minimum
-                epsilon = max(EPS_S*EPS_D**(global_timestep), EPS_MIN)  
+                epsilon = max(EPS_S - (global_timestep/EPS_FIN), EPS_MIN)  
                 global_timestep += 1
                 # Play one step of the game, obtaining the following state, the reward and 
                 # whether the episode is finished
