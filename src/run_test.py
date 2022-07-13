@@ -3,16 +3,15 @@ import numpy as np
 import gym
 from vizdoom import gym_wrapper
 # Common imports
+import math
 from time import sleep
-from typing import Tuple
 import argparse
 import tensorflow as tf
 from tqdm import trange
 # Our modules
 from agent import Agent
-from DQN import DQNAgent
-from actor_critic import BaselineA2C
 from state import StateManager
+from utils import check_gpu, load_weights, select_agent
 # Variables
 from variables import *
 
@@ -26,47 +25,7 @@ def parse_args():
         help='If active, old weights (if found) are loaded into the models.')
     return args.parse_args()
 
-def select_agent(args, num_actions:int) -> Tuple[Agent, str]:
-    '''
-    Returns the chosen agent and its save weight path
-    '''
-    agent = args.algorithm
-    if agent == 'random':
-        return Agent(num_actions, 
-            optimizer=tf.keras.optimizers.Adam(learning_rate=LR_DQN, clipnorm=CLIP_NO)), ''
-    elif agent == 'reinforce' or agent == 'a2c':
-        # The two algorithms share some similarities, so they are implemented with the same agent
-        return BaselineA2C(num_actions, 
-            optimizer=tf.keras.optimizers.Adam(learning_rate=LR_A2C, clipnorm=CLIP_NO),
-            model_name=agent), ACTOR_CRITIC_WEIGHTS_PATH
-    elif agent == 'dqn':
-        return DQNAgent(num_actions, 
-            optimizer=tf.keras.optimizers.Adam(learning_rate=LR_DQN, clipnorm=CLIP_NO)), \
-        DQN_WEIGHTS_PATH
-    # If we arrive here we have chosen something not implemented
-    raise NotImplementedError
-
-def load_weights(agent:Agent, save_path:str):
-    # Select actor weights based on the type of the actor
-    if agent.model_name != 'random':
-        try:
-            agent.model.load_weights(save_path)
-            print("Loaded weights of agent")
-        except:
-            print(f"Could not find weights for the agent at {save_path}")
-    else:
-        print("Agent not implemented or does not require weights.")
-
-def check_gpu() -> str:
-    # Check if a GPU is available for training
-    if len(tf.config.list_physical_devices('GPU')) > 0:
-        print(f"A GPU is available: {tf.config.list_physical_devices('GPU')}")
-        device = "/GPU:0"
-    else:
-        print("No GPU available: using CPU.")
-        device = "/CPU:0"
-    return device
-
+#############            PLAYING             ###############
 def play_game(env, agent:Agent):
     # Iterate over episodes
     for episode in range(TESTING_EPISODES):
@@ -80,7 +39,7 @@ def play_game(env, agent:Agent):
         state = state_manager.get_current_state(initial_obs['rgb'])
         done = False
         # Iterate until the episode is over
-        with trange(MAX_TIMESTEPS_PER_EPISODE) as pbar:
+        with trange(math.ceil(MAX_TIMESTEPS_PER_EPISODE/SKIP_FRAMES)) as pbar:
             for episode_step in pbar:
                 env.render(mode = "human")
                 # Play one step of the game, obtaining the following state, the reward and 
@@ -116,6 +75,7 @@ if __name__ == '__main__':
     # MOVE_BACKWARD
     # TURN_LEFT
     # TURN_RIGHT
+    num_actions = 7
     
     # The observation space contains 240x320 RGB frames
 
@@ -123,7 +83,6 @@ if __name__ == '__main__':
     # +dX for getting closer to the vest.
     # -dX for getting further from the vest.
     # -100 death penalty
-    num_actions = 7
 
     # Start playing
     with tf.device(device):

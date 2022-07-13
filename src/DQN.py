@@ -40,7 +40,8 @@ class DQNModel(Model):
 
 def ClippedMSE(y_true, y_pred):
     '''
-    Taken directly from Keras, but modified to add the clipping of the difference.
+    MSE loss function taken directly from Keras, but modified to add the 
+    clipping of the difference as in the paper.
     '''
     y_pred = tf.convert_to_tensor(y_pred)
     y_true = tf.cast(y_true, y_pred.dtype)

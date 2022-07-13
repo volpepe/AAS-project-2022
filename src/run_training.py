@@ -4,16 +4,14 @@ from vizdoom import gym_wrapper
 # Common imports
 import math
 import os
-from typing import List, Sequence, Tuple
 import argparse
 import numpy as np
 import tensorflow as tf
 from tqdm import trange
 # Our modules
 from agent import Agent
-from DQN import DQNAgent
-from actor_critic import BaselineA2C
 from state import StateManager
+from utils import check_gpu, load_weights, save_weights_and_logs, select_agent
 # Variables
 from variables import *
 
@@ -31,61 +29,9 @@ def parse_args():
         help='The starting episode for the task. Training will resume from this episode onwards. Default is 0.')
     return args.parse_args()
 
-#############           UTILITIES            ###############
-def select_agent(args, num_actions:int) -> Tuple[Agent, str]:
-    '''
-    Returns the chosen agent and its save weight path
-    '''
-    agent = args.algorithm
-    if agent == 'random':
-        return Agent(num_actions, 
-            optimizer=tf.keras.optimizers.Adam(learning_rate=LR_DQN, clipnorm=CLIP_NO)), ''
-    if agent == 'a2c':
-        # The two algorithms share some similarities, so they are implemented with the same agent
-        return BaselineA2C(num_actions, 
-            # This method has 2 optimizers, one for the actor and one for the critic
-            optimizer=tf.keras.optimizers.Adam(learning_rate=LR_A2C, clipnorm=CLIP_NO),
-            model_name=agent), ACTOR_CRITIC_WEIGHTS_PATH
-    if agent == 'dqn':
-        return DQNAgent(num_actions, 
-            optimizer=tf.keras.optimizers.Adam(learning_rate=LR_DQN, clipnorm=CLIP_NO)), \
-        DQN_WEIGHTS_PATH
-    # If we arrive here we have chosen something not implemented
-    raise NotImplementedError
-
-def save_weights_and_logs(agent:Agent, extrinsic_rewards:Sequence, save_path: str):
-    if save_path:
-        agent.model.save_weights(save_path)
-        print(f"Agent weights saved successfully at {save_path}")
-    else:
-        print(f'Tried to save model weights, but model needs no saving.')
-    np.save(os.path.join(LOGS_DIR, agent.model_name), np.array(extrinsic_rewards), allow_pickle=True)
-    print(f"Rewards history saved successfully at {os.path.join(LOGS_DIR, agent.model_name)}")
-
-def load_weights(agent:Agent, save_path:str):
-    # Select actor weights based on the type of the actor
-    if agent.model_name != 'random':
-        try:
-            agent.model.load_weights(save_path)
-            print("Loaded weights of agent")
-        except:
-            print(f"Could not find weights for the agent at {save_path}")
-    else:
-        print("Agent not implemented or does not require weights.")
-
-def check_gpu() -> str:
-    # Check if a GPU is available for training
-    if len(tf.config.list_physical_devices('GPU')) > 0:
-        print(f"A GPU is available: {tf.config.list_physical_devices('GPU')}")
-        device = "/GPU:0"
-    else:
-        print("No GPU available: using CPU.")
-        device = "/CPU:0"
-    return device
-
 #################### PLAYING #####################
 ### MAKE IT SEPARATE FOR MONTE CARLO (REINFORCE) VS ACTOR CRITIC AND DQN (TD)
-def play_game_TD(env, agent:Agent, save_weights:bool=True, save_path:str='', 
+def play_game(env, agent:Agent, save_weights:bool=True, save_path:str='', 
             start_episode:int=0):
     # Keep a list of obtained rewards
     game_rewards = []
@@ -107,8 +53,7 @@ def play_game_TD(env, agent:Agent, save_weights:bool=True, save_path:str='',
             for episode_step in pbar:
                 pbar.set_description(f'Global timestep: {global_timestep}')
                 # Compute epsilon in case the policy for training is epsilon-greedy. We use epsilon-decay to reduce random
-                # actions during time. Initially, epsilon is very high, but it quickly decreases.
-                # As decay, we multiply the initial epsilon by EPS_D at each timestep until it reaches the minimum
+                # actions during time. Initially, epsilon is very high, but it linearly decreases until step EPS_FIN
                 epsilon = max(EPS_S - (global_timestep/EPS_FIN), EPS_MIN)  
                 global_timestep += 1
                 # Play one step of the game, obtaining the following state, the reward and 
@@ -156,6 +101,7 @@ if __name__ == '__main__':
     # MOVE_BACKWARD
     # TURN_LEFT
     # TURN_RIGHT
+    num_actions = 7
     
     # The observation space contains 240x320 RGB frames
 
@@ -163,7 +109,6 @@ if __name__ == '__main__':
     # +dX for getting closer to the vest.
     # -dX for getting further from the vest.
     # -100 death penalty
-    num_actions = 7
 
     # Start playing
     with tf.device(device):
@@ -182,13 +127,7 @@ if __name__ == '__main__':
         if agent.model_name == 'dqn':
             agent.update_target_network()
         # Play the game training the agents or evaluating the loaded weights.
-        # If we are using actor critic or DQN as an agent, we need to update in a TD fashion.
-        if agent.model_name == 'dqn' or agent.model_name == 'a2c' or agent.model_name == 'random':
-            play_game_TD(env, agent, args.save_weights, save_path, args.start_episode)
-        # Otherwise, we use a Monte-Carlo update style where we only update the network at the end
-        #   of the episode
-        else:
-            raise NotImplementedError
+        play_game(env, agent, args.save_weights, save_path, args.start_episode)
 
     # At the end, close the environment
     env.close()
