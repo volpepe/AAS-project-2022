@@ -1,6 +1,6 @@
 ### EPISODES INFO
 MAX_TIMESTEPS_PER_EPISODE = 2100
-TRAINING_EPISODES = 50000
+TRAINING_EPISODES = 500000
 TESTING_EPISODES = 10
 
 ENV_NAME = "VizdoomHealthGatheringSupreme-v0"
@@ -27,7 +27,7 @@ EPS_FIN = 1e6        # Time step at which epsilon reaches the minimum
 EPS_S   = 1.0        # Starting epsilon value
 EPS_MIN = 0.1        # Minimum epsilon value
 ### DQN
-LR_DQN  = 2e-4                   # Learning rate for DQN
+LR_DQN  = 1e-3                   # Learning rate for DQN
 DQN_TRAIN_EVERY = 50             # DQN is updated once every n frames
 MAX_DQN_EXP_BUFFER_LEN = 8000    # Size of the experience buffer for DQN
 DQN_BATCH_SIZE = 32              # Batch size for DQN experience sampling

@@ -147,10 +147,10 @@ class DQNAgent(Agent):
                         tf.stack([state.repr for state in states]),
                         dtype=tf.float32))                                              # batch_sizex3
                     # Get the specific Q value for the actions the agent has made
-                    Q_vals = tf.reduce_sum(Q_vals*actions_mask, axis=1, keepdims=True)  # batch_sizex1
+                    Q_vals = tf.squeeze(tf.reduce_sum(Q_vals*actions_mask, axis=1, keepdims=True))
                     # Compute the loss between the targets (of which we do not compute gradients) and
                     # the Q values obtained by the model for state St
-                    loss = tf.reduce_mean(self.loss_function(targets, Q_vals))
+                    loss = tf.reduce_sum(self.loss_function(targets, Q_vals))
                 # Compute gradients and apply them on the trainable variables. Gradient is computed only with respect
                 # to the non-target network.
                 gradients = tape.gradient(loss, self.model.trainable_variables)
