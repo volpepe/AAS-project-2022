@@ -19,8 +19,8 @@ from variables import *
 def parse_args():
     args = argparse.ArgumentParser()
     args.add_argument('-a', '--algorithm', default='random', 
-        choices=['random','reinforce', 'a2c','dqn'], type=str,
-        help='The type of algorithm to use (random, reinforce, a2c, dqn). Default is random.')
+        choices=['random', 'a2c','dqn'], type=str,
+        help='The type of algorithm to use (random, a2c, dqn). Default is random.')
     args.add_argument('-s', '--save_weights', action='store_true', 
         help='If active, the new weights will be saved.')
     args.add_argument('-l', '--load_weights', action='store_true',

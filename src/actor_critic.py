@@ -95,11 +95,13 @@ class BaselineA2C(Agent):
         _, R = self.model(tf.cast(tf.expand_dims(next_states[-1].repr, axis=0), tf.float32))
         # The return is 0 if the episode is over
         R = tf.squeeze(R)*(1-dones[-1])
-        # We compute the returns going backwards
+        # We compute the returns going backwards (order t --> 1)
         returns = np.zeros_like(rewards)
         for t in range(len(rewards)-1, -1, -1):
             R = rewards[t] + GAMMA * R
             returns[t] = R
+        # Reverse the returns to process them in order 1 --> t
+        returns = returns[::-1]
         # Stack all state representations
         states = np.stack([s.repr for s in states])
         # Open the GradientTape to record the next operations for gradient computation
@@ -119,11 +121,11 @@ class BaselineA2C(Agent):
             # Compute action masks
             action_masks = tf.stack(tf.one_hot(actions, depth=self.num_actions))
             # The actor loss is:
-            actor_loss = tf.reduce_sum(-advantages*tf.reduce_sum(log_probs*action_masks, axis=1))
+            actor_loss = tf.reduce_sum(advantages * -tf.reduce_sum(log_probs * action_masks, axis=1))
             # Notice that it's a negative loss, because we want to actually improve the weights
             # in the direction of the loss. This is the performance measure J(theta).
             # The critic loss is:
-            critic_loss = tf.keras.losses.mean_squared_error(advantages, state_values)
+            critic_loss = tf.keras.losses.mean_squared_error(returns, state_values)
             # We also add an entropy loss to stabilize the probability distributions
             # and avoid large spikes. The more we maximise the entropy, the less probable each
             # event becomes, making the action probabilities more distributed.
