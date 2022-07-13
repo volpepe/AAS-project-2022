@@ -37,7 +37,7 @@ class ActorCriticModel(Model):
 
 class BaselineA2C(Agent):
     """
-    A2C agent, implemented using modified specifications from both paper.
+    A2C agent, implemented using modified specifications from both the DQN and A3C papers.
 
     - Input: a batch of 42x42x4 tensors representing the previous 4 42x42 stacked black-and-white frames from the game
     - Output: a tuple containing:
