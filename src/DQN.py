@@ -62,6 +62,8 @@ class DQNAgent(Agent):
         # We instantiate the target network and the actual Q-value network
         self.target_Q_model = DQNModel(num_actions)
         self.model = DQNModel(num_actions)
+        # Store the previous reward
+        self.previous_reward = 0.0
         
     def update_target_network(self):
         # Copy the same weights
@@ -85,11 +87,14 @@ class DQNAgent(Agent):
         action = self.epsilon_greedy_policy(state, epsilon)
         # Execute the action, get the next observation and reward
         next_obs, reward, done, _ = env.step(action)
+        # The new reward is subtracted from the old one
+        reward_delta = reward - self.previous_reward
+        self.previous_reward = reward
         # Transform the observation into the next state
         next_state = state_manager.get_current_state(next_obs['rgb'])
         # Add all the information into the replay buffer in order to train on it later.
         # Note that saved rewards are clipped in the range -1, 1
-        self.replay_buffer.append((state, action, np.clip(reward, -1., 1.), next_state, done))
+        self.replay_buffer.append((state, action, np.clip(reward_delta, -1., 1.), next_state, done))
         return next_state, reward, done
 
     def sample_experiences(self) -> \

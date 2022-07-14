@@ -30,7 +30,7 @@ class ActorCriticModel(Model):
         # Then we produce the policy values
         action_probs = self.actor(x)                    # 1xnum_actions probabilities
         # Avoid producing a tensor containing a probability of exactly 0 or 1 for some actions.
-        action_probs = tf.clip_by_value(action_probs, 1e-10, 1-1e-10)
+        action_probs = tf.clip_by_value(action_probs, 1e-10, 1.0-(1e-5))
         # ... Then we produce the state value.
         state_value = self.critic(x)                    # 1x1
         return action_probs, state_value
@@ -55,6 +55,8 @@ class BaselineA2C(Agent):
         self.model = ActorCriticModel(self.num_actions)
         # We keep an episode buffer that is used to keep the past knowledge
         self.episode_buffer = deque(maxlen=MAX_TIMESTEPS_PER_EPISODE)
+        # Store the previous reward
+        self.previous_reward = 0.0
 
     def play_one_step(self, env, state:State, epsilon:float, state_manager:StateManager) -> \
             Tuple[State, float, bool]:
@@ -70,10 +72,13 @@ class BaselineA2C(Agent):
         action = np.random.choice(self.num_actions, p=policy)
         # Execute the action, get the next observation and reward
         next_obs, reward, done, _ = env.step(action)
+        # The new reward is subtracted from the old one
+        reward_delta = reward - self.previous_reward
+        self.previous_reward = reward
         # Transform the observation into the next state
         next_state = state_manager.get_current_state(next_obs['rgb'])
         # Add the computed values to a buffer for later use in training.
-        self.episode_buffer.append((state, action, np.clip(reward, -1, 1), next_state, done))
+        self.episode_buffer.append((state, action, np.clip(reward_delta, -1, 1), next_state, done))
         return next_state, reward, done
 
     def collect_experiences(self) -> \
