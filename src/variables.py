@@ -37,5 +37,5 @@ DQN_C = 1000                     # The amount of frames after which the target n
 ### A2C
 MAX_AC_EXP_BUFFER_LEN = MAX_TIMESTEPS_PER_EPISODE
 LR_A2C  = 1e-3       # Learning rate for A2C
-SIGMA   = 0.01       # Entropy coefficient
+SIGMA   = 0.001      # Entropy coefficient
 CRITIC_C= 0.5        # Coefficient for critic loss

@@ -134,7 +134,7 @@ class BaselineA2C(Agent):
             # We also add an entropy loss to stabilize the probability distributions
             # and avoid large spikes. The more we maximise the entropy, the less probable each
             # event becomes, making the action probabilities more distributed.
-            total_loss = actor_loss + CRITIC_C * critic_loss + SIGMA * entropy_term
+            total_loss = actor_loss + CRITIC_C * critic_loss - SIGMA * entropy_term
             # We already consider the state value in the critic loss
             tf.stop_gradient(advantages)
         # Compute the gradients and apply changes
