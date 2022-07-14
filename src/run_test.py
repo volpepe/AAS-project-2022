@@ -45,7 +45,7 @@ def play_game(env, agent:Agent):
                 # Play one step of the game, obtaining the following state, the reward and 
                 # whether the episode is finished
                 next_state, reward, done = agent.play_one_step(env, state, 
-                    epsilon=0, state_manager=state_manager)
+                    epsilon=0.05, state_manager=state_manager)
                 state = next_state
                 episode_rewards.append(reward)
                 # Check if the episode is over and end the episode

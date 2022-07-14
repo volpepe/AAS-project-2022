@@ -121,7 +121,7 @@ class BaselineA2C(Agent):
             # Compute action masks
             action_masks = tf.stack(tf.one_hot(actions, depth=self.num_actions))
             # The actor loss is:
-            actor_loss = tf.reduce_sum(advantages * -tf.reduce_sum(log_probs * action_masks, axis=1))
+            actor_loss = tf.reduce_mean(advantages * -tf.reduce_sum(log_probs * action_masks, axis=1))
             # Notice that it's a negative loss, because we want to actually improve the weights
             # in the direction of the loss. This is the performance measure J(theta).
             # The critic loss is:
@@ -130,6 +130,8 @@ class BaselineA2C(Agent):
             # and avoid large spikes. The more we maximise the entropy, the less probable each
             # event becomes, making the action probabilities more distributed.
             total_loss = actor_loss + CRITIC_C * critic_loss + SIGMA * entropy_term
+            # We already consider the state value in the critic loss
+            tf.stop_gradient(advantages)
         # Compute the gradients and apply changes
         gradients = tape.gradient(total_loss, self.model.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
