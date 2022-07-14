@@ -95,13 +95,11 @@ class BaselineA2C(Agent):
         _, R = self.model(tf.cast(tf.expand_dims(next_states[-1].repr, axis=0), tf.float32))
         # The return is 0 if the episode is over
         R = tf.squeeze(R)*(1-dones[-1])
-        # We compute the returns going backwards (order t --> 1)
+        # We compute the returns going backwards
         returns = np.zeros_like(rewards)
         for t in range(len(rewards)-1, -1, -1):
             R = rewards[t] + GAMMA * R
             returns[t] = R
-        # Reverse the returns to process them in order 1 --> t
-        returns = returns[::-1]
         # Stack all state representations
         states = np.stack([s.repr for s in states])
         # Open the GradientTape to record the next operations for gradient computation
