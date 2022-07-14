@@ -68,7 +68,7 @@ def play_game(env, agent:Agent, save_weights:bool=True, save_path:str='',
                 if done:
                     break
         # The episode is over: get the maximum obtained reward
-        episode_reward = max(episode_rewards)
+        episode_reward = sum(episode_rewards)
         game_rewards.append({global_timestep: episode_reward})
         print(f"Episode: {episode}, Total reward: {episode_reward}")
         recent_mean_reward = np.mean([list(g.values())[0] for g in game_rewards[-10:]])

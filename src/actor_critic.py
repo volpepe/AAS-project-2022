@@ -55,8 +55,6 @@ class BaselineA2C(Agent):
         self.model = ActorCriticModel(self.num_actions)
         # We keep an episode buffer that is used to keep the past knowledge
         self.episode_buffer = deque(maxlen=MAX_TIMESTEPS_PER_EPISODE)
-        # Store the previous reward
-        self.previous_reward = 0.0
 
     def play_one_step(self, env, state:State, epsilon:float, state_manager:StateManager) -> \
             Tuple[State, float, bool]:
@@ -72,13 +70,10 @@ class BaselineA2C(Agent):
         action = np.random.choice(self.num_actions, p=policy)
         # Execute the action, get the next observation and reward
         next_obs, reward, done, _ = env.step(action)
-        # The new reward is subtracted from the old one
-        reward_delta = reward - self.previous_reward
-        self.previous_reward = reward
         # Transform the observation into the next state
         next_state = state_manager.get_current_state(next_obs['rgb'])
         # Add the computed values to a buffer for later use in training.
-        self.episode_buffer.append((state, action, np.clip(reward_delta, -1, 1), next_state, done))
+        self.episode_buffer.append((state, action, np.clip(reward, -1, 1), next_state, done))
         return next_state, reward, done
 
     def collect_experiences(self) -> \

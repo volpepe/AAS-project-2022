@@ -53,7 +53,7 @@ def play_game(env, agent:Agent):
                     break
                 sleep(1/30) # 30 FPS
         # The episode is over: get the maximum obtained reward
-        episode_reward = max(episode_rewards)
+        episode_reward = sum(episode_rewards)
         print(f"Episode: {episode}, Total reward: {episode_reward}")
 
 ##################### START #####################
