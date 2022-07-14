@@ -21,7 +21,7 @@ LOGS_DIR = 'models/simpler/logs/'
 ### PARAMS
 CLIP_NO = 40.0       # Gradient norm clipping
 GAMMA   = 0.99       # Discount for rewards
-EPS_FIN = 700000     # Time step at which epsilon reaches the minimum
+EPS_FIN = 1e6        # Time step at which epsilon reaches the minimum
 EPS_S   = 1.0        # Starting epsilon value
 EPS_MIN = 0.1        # Minimum epsilon value
 ### DQN
